@@ -725,7 +725,7 @@ static int sysedp_dynamic_capping_probe(struct platform_device *pdev)
 
 	INIT_DELAYED_WORK(&capping_work, capping_worker);
 	pm_qos_add_request(&cpupwr_qos, PM_QOS_MAX_CPU_POWER,
-			   PM_QOS_CPU_POWER_MW_MAX_DEFAULT_VALUE);
+			   PM_QOS_CPU_FREQ_MAX_DEFAULT_VALUE);
 
 	if (capping_data->gpu_cap_as_mw)
 		pm_qos_add_request(&gpupwr_qos, PM_QOS_MAX_GPU_POWER,
