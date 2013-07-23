@@ -148,19 +148,6 @@ static struct pm_qos_object max_online_cpus_pm_qos = {
 
 };
 
-static BLOCKING_NOTIFIER_HEAD(max_gpu_pwr_notifier);
-static struct pm_qos_constraints max_gpu_pwr_constraints = {
-	.list = PLIST_HEAD_INIT(max_gpu_pwr_constraints.list),
-	.target_value = PM_QOS_GPU_POWER_MW_MAX_DEFAULT_VALUE,
-	.default_value = PM_QOS_GPU_POWER_MW_MAX_DEFAULT_VALUE,
-	.type = PM_QOS_MIN,
-	.notifiers = &max_gpu_pwr_notifier,
-};
-static struct pm_qos_object max_gpu_pwr_qos = {
-	.constraints = &max_gpu_pwr_constraints,
-	.name = "max_gpu_power",
-};
-
 static BLOCKING_NOTIFIER_HEAD(cpu_freq_min_notifier);
 static struct pm_qos_constraints cpu_freq_min_constraints = {
 	.list = PLIST_HEAD_INIT(cpu_freq_min_constraints.list),
@@ -187,6 +174,32 @@ static struct pm_qos_object cpu_freq_max_pm_qos = {
 	.name = "cpu_freq_max",
 };
 
+static BLOCKING_NOTIFIER_HEAD(gpu_freq_min_notifier);
+static struct pm_qos_constraints gpu_freq_min_constraints = {
+	.list = PLIST_HEAD_INIT(gpu_freq_min_constraints.list),
+	.target_value = PM_QOS_GPU_FREQ_MIN_DEFAULT_VALUE,
+	.default_value = PM_QOS_GPU_FREQ_MIN_DEFAULT_VALUE,
+	.type = PM_QOS_MAX,
+	.notifiers = &gpu_freq_min_notifier,
+};
+static struct pm_qos_object gpu_freq_min_pm_qos = {
+	.constraints = &gpu_freq_min_constraints,
+	.name = "gpu_freq_min",
+};
+
+static BLOCKING_NOTIFIER_HEAD(gpu_freq_max_notifier);
+static struct pm_qos_constraints gpu_freq_max_constraints = {
+	.list = PLIST_HEAD_INIT(gpu_freq_max_constraints.list),
+	.target_value = PM_QOS_GPU_FREQ_MAX_DEFAULT_VALUE,
+	.default_value = PM_QOS_GPU_FREQ_MAX_DEFAULT_VALUE,
+	.type = PM_QOS_MIN,
+	.notifiers = &gpu_freq_max_notifier,
+};
+static struct pm_qos_object gpu_freq_max_pm_qos = {
+	.constraints = &gpu_freq_max_constraints,
+	.name = "gpu_freq_max",
+};
+
 static struct pm_qos_object *pm_qos_array[] = {
 	&null_pm_qos,
 	&cpu_dma_pm_qos,
@@ -195,9 +208,10 @@ static struct pm_qos_object *pm_qos_array[] = {
 	&memory_bandwidth_pm_qos,
 	&min_online_cpus_pm_qos,
 	&max_online_cpus_pm_qos,
-	&max_gpu_pwr_qos,
 	&cpu_freq_min_pm_qos,
-	&cpu_freq_max_pm_qos
+	&cpu_freq_max_pm_qos,
+	&gpu_freq_min_pm_qos,
+	&gpu_freq_max_pm_qos
 };
 
 static ssize_t pm_qos_power_write(struct file *filp, const char __user *buf,
