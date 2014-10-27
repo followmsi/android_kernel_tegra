@@ -729,7 +729,7 @@ static int sysedp_dynamic_capping_probe(struct platform_device *pdev)
 
 	if (capping_data->gpu_cap_as_mw)
 		pm_qos_add_request(&gpupwr_qos, PM_QOS_MAX_GPU_POWER,
-				   PM_QOS_GPU_POWER_MW_MAX_DEFAULT_VALUE);
+				   PM_QOS_GPU_POWER_MAX_DEFAULT_VALUE);
 
 	mutex_lock(&core_lock);
 	avail_power = capping_data->init_req_watts;
