@@ -408,6 +408,21 @@ static struct fiops_ioc *fiops_select_ioc(struct fiops_data *fiopsd)
 		return NULL;
 	}
 
+	/* Let sync request preempt async queue */
+	if (!rq_is_sync(rq) && service_tree->count > 1) {
+		struct rb_node *tmp = rb_next(&ioc->rb_node);
+		struct fiops_ioc *sync_ioc = NULL;
+		while (tmp) {
+			sync_ioc = rb_entry(tmp, struct fiops_ioc, rb_node);
+			rq = rq_entry_fifo(sync_ioc->fifo.next);
+			if (rq_is_sync(rq))
+				break;
+			tmp = rb_next(&sync_ioc->rb_node);
+		}
+		if (sync_ioc)
+			ioc = sync_ioc;
+	}
+
 	return ioc;
 }
 
@@ -467,11 +482,11 @@ static void fiops_init_prio_data(struct fiops_ioc *cic)
 		cic->wl_type = fiops_wl_type(task_nice_ioclass(tsk));
 		break;
 	case IOPRIO_CLASS_RT:
-		cic->ioprio = task_ioprio(ioc);
+		cic->ioprio = IOPRIO_PRIO_DATA(ioc->ioprio);
 		cic->wl_type = fiops_wl_type(IOPRIO_CLASS_RT);
 		break;
 	case IOPRIO_CLASS_BE:
-		cic->ioprio = task_ioprio(ioc);
+		cic->ioprio = IOPRIO_PRIO_DATA(ioc->ioprio);
 		cic->wl_type = fiops_wl_type(IOPRIO_CLASS_BE);
 		break;
 	case IOPRIO_CLASS_IDLE:
@@ -501,7 +516,7 @@ static void fiops_insert_request(struct request_queue *q, struct request *rq)
 static inline void fiops_schedule_dispatch(struct fiops_data *fiopsd)
 {
 	if (fiopsd->busy_queues)
-		kblockd_schedule_work(fiopsd->queue, &fiopsd->unplug_work);
+		kblockd_schedule_work(&fiopsd->unplug_work);
 }
 
 static void fiops_completed_request(struct request_queue *q, struct request *rq)
@@ -528,7 +543,7 @@ fiops_find_rq_fmerge(struct fiops_data *fiopsd, struct bio *bio)
 	cic = fiops_cic_lookup(fiopsd, tsk->io_context);
 
 	if (cic) {
-		sector_t sector = bio->bi_sector + bio_sectors(bio);
+		sector_t sector = bio->bi_iter.bi_sector + bio_sectors(bio);
 
 		return elv_rb_find(&cic->sort_list, sector);
 	}
@@ -614,16 +629,27 @@ static void fiops_kick_queue(struct work_struct *work)
 	spin_unlock_irq(q->queue_lock);
 }
 
-static void *fiops_init_queue(struct request_queue *q)
+static int fiops_init_queue(struct request_queue *q, struct elevator_type *e)
 {
 	struct fiops_data *fiopsd;
 	int i;
+	struct elevator_queue *eq;
+
+	eq = elevator_alloc(q, e);
+	if (!eq)
+		return -ENOMEM;
 
 	fiopsd = kzalloc_node(sizeof(*fiopsd), GFP_KERNEL, q->node);
-	if (!fiopsd)
-		return NULL;
+	if (!fiopsd) {
+		kobject_put(&eq->kobj);
+		return -ENOMEM;
+	}
+	eq->elevator_data = fiopsd;
 
 	fiopsd->queue = q;
+	spin_lock_irq(q->queue_lock);
+	q->elevator = eq;
+	spin_unlock_irq(q->queue_lock);
 
 	for (i = IDLE_WORKLOAD; i <= RT_WORKLOAD; i++)
 		fiopsd->service_tree[i] = FIOPS_RB_ROOT;
@@ -635,7 +661,7 @@ static void *fiops_init_queue(struct request_queue *q)
 	fiopsd->sync_scale = VIOS_SYNC_SCALE;
 	fiopsd->async_scale = VIOS_ASYNC_SCALE;
 
-	return fiopsd;
+	return 0;
 }
 
 static void fiops_init_icq(struct io_cq *icq)
