@@ -414,6 +414,9 @@ static __init int armada_38x_cpuidle_init(void)
 	void __iomem *mpsoc_base;
 	u32 reg;
 
+	pr_warn("CPU idle is currently broken on Armada 38x: disabling");
+	return 0;
+
 	np = of_find_compatible_node(NULL, NULL,
 				     "marvell,armada-380-coherency-fabric");
 	if (!np)
@@ -475,6 +478,16 @@ static int __init mvebu_v7_cpu_pm_init(void)
 		return 0;
 	of_node_put(np);
 
+	/*
+	 * Currently the CPU idle support for Armada 38x is broken, as
+	 * the CPU hotplug uses some of the CPU idle functions it is
+	 * broken too, so let's disable it
+	 */
+	if (of_machine_is_compatible("marvell,armada380")) {
+		cpu_hotplug_disable();
+		pr_warn("CPU hotplug support is currently broken on Armada 38x: disabling");
+	}
+
 	if (of_machine_is_compatible("marvell,armadaxp"))
 		ret = armada_xp_cpuidle_init();
 	else if (of_machine_is_compatible("marvell,armada370"))
@@ -488,7 +501,8 @@ static int __init mvebu_v7_cpu_pm_init(void)
 		return ret;
 
 	mvebu_v7_pmsu_enable_l2_powerdown_onidle();
-	platform_device_register(&mvebu_v7_cpuidle_device);
+	if (mvebu_v7_cpuidle_device.name)
+		platform_device_register(&mvebu_v7_cpuidle_device);
 	cpu_pm_register_notifier(&mvebu_v7_cpu_pm_notifier);
 
 	return 0;
