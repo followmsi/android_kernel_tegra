@@ -42,4 +42,17 @@ enum dm_verity_error_behavior {
 int dm_verity_register_error_notifier(struct notifier_block *nb);
 int dm_verity_unregister_error_notifier(struct notifier_block *nb);
 
-#endif  /* DM_VERITY_H */
+extern void verity_status(struct dm_target *ti, status_type_t type,
+			unsigned status_flags, char *result, unsigned maxlen);
+extern int verity_ioctl(struct dm_target *ti, unsigned cmd,
+			unsigned long arg);
+extern int verity_merge(struct dm_target *ti, struct bvec_merge_data *bvm,
+			struct bio_vec *biovec, int max_size);
+extern int verity_iterate_devices(struct dm_target *ti,
+				iterate_devices_callout_fn fn, void *data);
+extern void verity_io_hints(struct dm_target *ti, struct queue_limits *limits);
+extern void verity_dtr(struct dm_target *ti);
+extern int verity_ctr(struct dm_target *ti, unsigned argc, char **argv);
+extern int verity_map(struct dm_target *ti, struct bio *bio);
+
+#endif /* DM_VERITY_H */
