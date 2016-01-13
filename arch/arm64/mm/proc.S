@@ -205,7 +205,6 @@ ENTRY(__cpu_setup)
 	mov	x0, #1 << 12			// Reset mdscr_el1 and disable
 	msr	mdscr_el1, x0			// access to the DCC from EL0
 	reset_pmuserenr_el0 x0			// Disable PMU access from EL0
-	msr	pmuserenr_el0, xzr		// Disable PMU access from EL0
 	/*
 	 * Memory region attributes for LPAE:
 	 *
