@@ -22,6 +22,7 @@
  * Authors: Ben Skeggs
  */
 
+#include <subdev/bar.h>
 #include <subdev/ltc.h>
 #include <subdev/mmu.h>
 #include <subdev/fb.h>
@@ -347,6 +348,7 @@ nvkm_vm_unmap_pgt(struct nvkm_vm *vm, int big, u32 fpde, u32 lpde)
 	unsigned int num_unref_pgts = 0;
 	struct nvkm_gpuobj **unref_pgts;
 	struct nvkm_mmu *mmu = vm->mmu;
+	struct nvkm_ltc *ltc = nvkm_ltc(mmu);
 	struct nvkm_vm_pgd *vpgd;
 	struct nvkm_vm_pgt *vpgt;
 	struct nvkm_gpuobj *pgt;
@@ -375,6 +377,7 @@ nvkm_vm_unmap_pgt(struct nvkm_vm *vm, int big, u32 fpde, u32 lpde)
 
 		mutex_unlock(&nv_subdev(mmu)->mutex);
 
+		ltc->invalidate(ltc);
 		mmu->flush(vm);
 
 		for (i = 0; i < num_unref_pgts; ++i)
@@ -390,6 +393,7 @@ static int
 nvkm_vm_map_pgt(struct nvkm_vm *vm, u32 pde, u32 type)
 {
 	struct nvkm_mmu *mmu = vm->mmu;
+	struct nvkm_ltc *ltc = nvkm_ltc(mmu);
 	struct nvkm_vm_pgt *vpgt = &vm->pgt[pde - vm->fpde];
 	struct nvkm_vm_pgd *vpgd;
 	struct nvkm_gpuobj *pgt;
@@ -419,6 +423,11 @@ nvkm_vm_map_pgt(struct nvkm_vm *vm, u32 pde, u32 type)
 	list_for_each_entry(vpgd, &vm->pgd_list, head) {
 		mmu->map_pgt(vpgd->obj, pde, vpgt->obj);
 	}
+
+	mutex_unlock(&nv_subdev(mmu)->mutex);
+	ltc->invalidate(ltc);
+	mmu->flush(vm);
+	mutex_lock(&nv_subdev(mmu)->mutex);
 
 	return 0;
 }
@@ -593,6 +602,8 @@ static int
 nvkm_vm_link(struct nvkm_vm *vm, struct nvkm_gpuobj *pgd)
 {
 	struct nvkm_mmu *mmu = vm->mmu;
+	struct nvkm_ltc *ltc = nvkm_ltc(mmu);
+	struct nvkm_bar *bar = nvkm_bar(mmu);
 	struct nvkm_vm_pgd *vpgd;
 	int i;
 
@@ -610,6 +621,12 @@ nvkm_vm_link(struct nvkm_vm *vm, struct nvkm_gpuobj *pgd)
 		mmu->map_pgt(pgd, i, vm->pgt[i - vm->fpde].obj);
 	list_add(&vpgd->head, &vm->pgd_list);
 	mutex_unlock(&nv_subdev(mmu)->mutex);
+
+	ltc->invalidate(ltc);
+	/* bar might yet be initialized when this is called */
+	if (bar)
+		mmu->flush(vm);
+
 	return 0;
 }
 
