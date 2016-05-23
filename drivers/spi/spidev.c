@@ -249,16 +249,20 @@ static int spidev_message(struct spidev_data *spidev,
 	 *  Don't use if we exceed maxiumum buffer size
 	 */
 	for (n = 0; n < n_xfers; n++) {
-		total += round_up(u_xfers[n].len, alignment);
+		u32 aligned_len = round_up(u_xfers[n].len, alignment);
 
-		if (total < u_xfers[n].len || total > bufsiz) {
-			status = -EMSGSIZE;
-			goto done;
+		if (aligned_len < u_xfers[n].len) {
+			alignment = 1;
+			break;
+		}
+
+		total += aligned_len;
+
+		if (total < aligned_len || total > bufsiz) {
+			alignment = 1;
+			break;
 		}
 	}
-
-	if (total >= bufsiz)
-		alignment = 1;
 
 	total = 0;
 	for (n = n_xfers, k_tmp = k_xfers, u_tmp = u_xfers;
