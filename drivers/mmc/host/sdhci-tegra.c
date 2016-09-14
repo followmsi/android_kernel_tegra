@@ -408,7 +408,7 @@ static void sdhci_tegra_set_tap_delay(struct sdhci_host *host,
 		sdhci_reset(host, SDHCI_RESET_CMD | SDHCI_RESET_DATA);
 		if (clk_on) {
 			val = sdhci_readw(host, SDHCI_CLOCK_CONTROL);
-			val &= ~SDHCI_CLOCK_CARD_EN;
+			val |= SDHCI_CLOCK_CARD_EN;
 			sdhci_writew(host, val, SDHCI_CLOCK_CONTROL);
 		}
 	}
@@ -649,7 +649,8 @@ static const struct sdhci_pltfm_data sdhci_tegra210_pdata = {
 	.quirks2 = SDHCI_QUIRK2_BROKEN_64_BIT_DMA |
 		   SDHCI_QUIRK2_HOST_OFF_CARD_ON |
 		   SDHCI_QUIRK2_TUNING_CLOCK_OFF |
-		   SDHCI_QUIRK2_RESET_ON_TUNE_TIMEOUT,
+		   SDHCI_QUIRK2_RESET_ON_TUNE_TIMEOUT |
+		   SDHCI_QUIRK2_RTPM_NO_RETUNE,
 	.ops  = &sdhci_tegra_ops,
 };
 

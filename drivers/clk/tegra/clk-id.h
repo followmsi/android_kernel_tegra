@@ -73,6 +73,7 @@ enum clk_id {
 	tegra_clk_dmic3,
 	tegra_clk_dp2,
 	tegra_clk_dpaux,
+	tegra_clk_dpaux1,
 	tegra_clk_dsia,
 	tegra_clk_dsialp,
 	tegra_clk_dsia_mux,
@@ -458,6 +459,7 @@ enum clk_id {
 	tegra_clk_sata_slcg_ovr,
 	tegra_clk_sata_slcg_ovr_ipfs,
 	tegra_clk_sata_slcg_ovr_fpci,
+	tegra_clk_sor_safe,
 	tegra_clk_max,
 };
 

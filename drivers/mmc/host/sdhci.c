@@ -2012,6 +2012,9 @@ static int sdhci_execute_tuning(struct mmc_host *mmc, u32 opcode)
 				"Buffer Read Ready interrupt during tuning "
 				"procedure, falling back to fixed sampling "
 				"clock\n");
+			pr_err("%s: Tuning failed on iteration: %d\n",
+				mmc_hostname(host->mmc), tuning_loop_counter);
+
 			ctrl = sdhci_readw(host, SDHCI_HOST_CONTROL2);
 			ctrl &= ~SDHCI_CTRL_TUNED_CLK;
 			ctrl &= ~SDHCI_CTRL_EXEC_TUNING;
@@ -2738,7 +2741,9 @@ int sdhci_runtime_suspend_host(struct sdhci_host *host)
 	unsigned long flags;
 
 	mmc_retune_timer_stop(host->mmc);
-	mmc_retune_needed(host->mmc);
+
+	if (!(host->quirks2 & SDHCI_QUIRK2_RTPM_NO_RETUNE))
+		mmc_retune_needed(host->mmc);
 
 	if (host->mmc->qos)
 		pm_qos_update_request(host->mmc->qos, PM_QOS_DEFAULT_VALUE);
