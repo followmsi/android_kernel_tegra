@@ -48,8 +48,6 @@ static inline size_t buffer_start(struct persistent_ram_zone *prz)
 	return prz->buffer->start;
 }
 
-static DEFINE_RAW_SPINLOCK(buffer_lock);
-
 /* increase and wrap the start pointer, returning the old value */
 static size_t buffer_start_add_locked(struct persistent_ram_zone *prz, size_t a)
 {
@@ -57,7 +55,7 @@ static size_t buffer_start_add_locked(struct persistent_ram_zone *prz, size_t a)
 	int new;
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&buffer_lock, flags);
+	raw_spin_lock_irqsave(&prz->buffer_lock, flags);
 
 	old = prz->buffer->start;
 	new = old + a;
@@ -65,7 +63,7 @@ static size_t buffer_start_add_locked(struct persistent_ram_zone *prz, size_t a)
 		new -= prz->buffer_size;
 	prz->buffer->start = new;
 
-	raw_spin_unlock_irqrestore(&buffer_lock, flags);
+	raw_spin_unlock_irqrestore(&prz->buffer_lock, flags);
 
 	return old;
 }
@@ -77,7 +75,7 @@ static void buffer_size_add_locked(struct persistent_ram_zone *prz, size_t a)
 	size_t new;
 	unsigned long flags;
 
-	raw_spin_lock_irqsave(&buffer_lock, flags);
+	raw_spin_lock_irqsave(&prz->buffer_lock, flags);
 
 	old = prz->buffer->size;
 	if (old == prz->buffer_size)
@@ -89,7 +87,7 @@ static void buffer_size_add_locked(struct persistent_ram_zone *prz, size_t a)
 	prz->buffer->size = new;
 
 exit:
-	raw_spin_unlock_irqrestore(&buffer_lock, flags);
+	raw_spin_unlock_irqrestore(&prz->buffer_lock, flags);
 }
 
 static size_t (*buffer_start_add)(struct persistent_ram_zone *, size_t) = buffer_start_add_locked;
@@ -442,6 +440,7 @@ static int persistent_ram_post_init(struct persistent_ram_zone *prz, u32 sig,
 
 	prz->buffer->sig = sig;
 	persistent_ram_zap(prz);
+	prz->buffer_lock = __RAW_SPIN_LOCK_UNLOCKED(buffer_lock);
 
 	return 0;
 }
