@@ -2,6 +2,7 @@
 #define _AF_NETLINK_H
 
 #include <linux/rhashtable.h>
+#include <linux/atomic.h>
 #include <net/sock.h>
 
 #define NLGRPSZ(x)	(ALIGN(x, sizeof(unsigned long) * 8) / 8)
@@ -24,6 +25,7 @@ struct netlink_ring {
 struct netlink_sock {
 	/* struct sock has to be the first member of netlink_sock */
 	struct sock		sk;
+	u32			rhash_portid;
 	u32			portid;
 	u32			dst_portid;
 	u32			dst_group;
