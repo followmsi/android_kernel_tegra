@@ -26,6 +26,9 @@
 #include "ion.h"
 #include "ion_priv.h"
 
+
+const size_t PAGED_POOL_MAX_SIZE_THRESHOLD = 128 * 1024 * 1024; // 128 MB
+
 static gfp_t high_order_gfp_flags = (GFP_HIGHUSER | __GFP_ZERO | __GFP_NOWARN |
 				     __GFP_NORETRY) & ~__GFP_WAIT;
 static gfp_t low_order_gfp_flags  = (GFP_HIGHUSER | __GFP_ZERO | __GFP_NOWARN);
@@ -60,18 +63,19 @@ static struct page *alloc_buffer_page(struct ion_system_heap *heap,
 	struct ion_page_pool *pool = heap->pools[order_to_index(order)];
 	struct page *page;
 
-	if (!cached) {
-		page = ion_page_pool_alloc(pool);
-	} else {
-		gfp_t gfp_flags = low_order_gfp_flags;
+	if ((cached) || (buffer->private_flags & ION_PRIV_FLAG_SHRINKER_FREE)) {
 
-		if (order > 4)
-			gfp_flags = high_order_gfp_flags;
+		gfp_t gfp_flags = (order > 4) ? high_order_gfp_flags :
+				low_order_gfp_flags;
+
 		page = alloc_pages(gfp_flags | __GFP_COMP, order);
-		if (!page)
-			return NULL;
-		ion_pages_sync_for_device(NULL, page, PAGE_SIZE << order,
+
+		if(cached && page) {
+			ion_pages_sync_for_device(NULL, page, PAGE_SIZE << order,
 						DMA_BIDIRECTIONAL);
+		}
+	} else {
+		page = ion_page_pool_alloc(pool);
 	}
 
 	return page;
@@ -102,6 +106,11 @@ static struct page *alloc_largest_available(struct ion_system_heap *heap,
 {
 	struct page *page;
 	int i;
+
+	// Do not allow huge buffer to be place in the page pool,
+	// since this would deplete the system of free pages.
+	if (size > PAGED_POOL_MAX_SIZE_THRESHOLD)
+		buffer->private_flags |= ION_PRIV_FLAG_SHRINKER_FREE;
 
 	for (i = 0; i < num_orders; i++) {
 		if (size < order_to_size(orders[i]))
