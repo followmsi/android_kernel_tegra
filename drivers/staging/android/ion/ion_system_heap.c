@@ -70,7 +70,7 @@ static struct page *alloc_buffer_page(struct ion_system_heap *heap,
 
 		page = alloc_pages(gfp_flags | __GFP_COMP, order);
 
-		if(cached && page) {
+		if (page) {
 			ion_pages_sync_for_device(NULL, page, PAGE_SIZE << order,
 						DMA_BIDIRECTIONAL);
 		}
