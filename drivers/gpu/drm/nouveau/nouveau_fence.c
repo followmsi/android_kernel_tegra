@@ -431,12 +431,13 @@ nouveau_fence_wait_legacy(struct fence *f, bool intr, long wait)
 }
 
 static int
-nouveau_fence_wait_busy(struct nouveau_fence *fence, bool intr)
+nouveau_fence_wait_busy(struct nouveau_fence *fence, bool intr,
+		unsigned long timeout)
 {
 	int ret = 0;
 
 	while (!nouveau_fence_done(fence)) {
-		if (time_after_eq(jiffies, fence->timeout)) {
+		if (time_after_eq(jiffies, timeout)) {
 			ret = -EBUSY;
 			break;
 		}
@@ -456,12 +457,13 @@ nouveau_fence_wait_busy(struct nouveau_fence *fence, bool intr)
 }
 
 int
-nouveau_fence_wait(struct nouveau_fence *fence, bool lazy, bool intr)
+nouveau_fence_wait_timeout(struct nouveau_fence *fence, bool lazy, bool intr,
+		unsigned long timeout)
 {
 	long ret;
 
 	if (!lazy)
-		return nouveau_fence_wait_busy(fence, intr);
+		return nouveau_fence_wait_busy(fence, intr, timeout);
 
 	ret = fence_wait_timeout(&fence->base, intr, 15 * HZ);
 	if (ret < 0)
@@ -470,6 +472,12 @@ nouveau_fence_wait(struct nouveau_fence *fence, bool lazy, bool intr)
 		return -EBUSY;
 	else
 		return 0;
+}
+
+int
+nouveau_fence_wait(struct nouveau_fence *fence, bool lazy, bool intr)
+{
+	return nouveau_fence_wait_timeout(fence, lazy, intr, fence->timeout);
 }
 
 int

@@ -44,18 +44,20 @@ MODULE_PARM_DESC(vram_pushbuf, "Create DMA push buffers in VRAM");
 int nouveau_vram_pushbuf;
 module_param_named(vram_pushbuf, nouveau_vram_pushbuf, int, 0400);
 
-int
-nouveau_channel_idle(struct nouveau_channel *chan)
+static int
+_nouveau_channel_idle(struct nouveau_channel *chan, bool suspend)
 {
 	struct nouveau_cli *cli = (void *)nvif_client(chan->object);
 	struct nouveau_fence *fence = NULL;
+	unsigned long timeout;
 	int ret;
 
 	mutex_lock(&chan->fifo_lock);
 	ret = nouveau_fence_new(chan, false, &fence);
 	mutex_unlock(&chan->fifo_lock);
 	if (!ret) {
-		ret = nouveau_fence_wait(fence, false, false);
+		timeout = suspend ? jiffies + 5 * HZ : fence->timeout;
+		ret = nouveau_fence_wait_timeout(fence, false, false, timeout);
 		nouveau_fence_unref(&fence);
 	}
 
@@ -63,6 +65,18 @@ nouveau_channel_idle(struct nouveau_channel *chan)
 		NV_PRINTK(error, cli, "failed to idle channel 0x%08x [%s]\n",
 			  chan->object->handle, nvxx_client(&cli->base)->name);
 	return ret;
+}
+
+int
+nouveau_channel_idle(struct nouveau_channel *chan)
+{
+	return _nouveau_channel_idle(chan, false);
+}
+
+int
+nouveau_channel_idle_suspend(struct nouveau_channel *chan)
+{
+	return _nouveau_channel_idle(chan, true);
 }
 
 void
