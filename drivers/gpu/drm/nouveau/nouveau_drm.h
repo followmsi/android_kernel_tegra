@@ -170,6 +170,8 @@ struct nouveau_drm {
 
 	struct dev_pm_domain vga_pm_domain;
 	struct pci_dev *hdmi_device;
+
+	unsigned long recovery_delay;
 };
 
 static inline struct nouveau_drm *
