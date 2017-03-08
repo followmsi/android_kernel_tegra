@@ -1763,6 +1763,16 @@ config TEST_MODULE
 	  on printk when loaded. It is designed to be used for basic
 	  evaluation of the module loading subsystem.
 
+config CC_WERROR
+	bool "Treat all compile warnings as errors"
+	default n
+	help
+	 Select this option to set compiler warnings as errors,
+	 to prevent easily-fixable problems from creeping into
+	 the codebase.
+
+	 If unsure, say N.
+
 source "samples/Kconfig"
 
 source "lib/Kconfig.kgdb"
