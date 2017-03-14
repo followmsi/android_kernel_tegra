@@ -11,6 +11,8 @@ struct nvkm_fifo_chan {
 	u32 size;
 	u16 chid;
 	atomic_t refcnt; /* NV04_NVSW_SET_REF */
+	void (*timeout_start)(struct nvkm_fifo_chan *);
+	void (*timeout_stop)(struct nvkm_fifo_chan *);
 };
 
 static inline struct nvkm_fifo_chan *
@@ -134,4 +136,6 @@ int gf100_fifo_chan_kick(struct nvkm_fifo_chan *chan);
 int gf100_fifo_chan_kick_locked(struct nvkm_fifo_chan *chan);
 void nvkm_fifo_chan_enable(struct nvkm_fifo *, struct nvkm_fifo_chan *);
 void nvkm_fifo_chan_disable(struct nvkm_fifo *, struct nvkm_fifo_chan *);
+void nvkm_fifo_chan_timeout_start(struct nvkm_fifo_chan *chan);
+void nvkm_fifo_chan_timeout_stop(struct nvkm_fifo_chan *chan);
 #endif
