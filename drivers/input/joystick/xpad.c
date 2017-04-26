@@ -202,7 +202,6 @@ static const struct xpad_device {
 	{ 0x1430, 0x8888, "TX6500+ Dance Pad (first generation)", MAP_DPAD_TO_BUTTONS, XTYPE_XBOX },
 	{ 0x146b, 0x0601, "BigBen Interactive XBOX 360 Controller", 0, XTYPE_XBOX360 },
 	{ 0x1532, 0x0037, "Razer Sabertooth", 0, XTYPE_XBOX360 },
-	{ 0x1532, 0x0a03, "Razer Wildcat", 0, XTYPE_XBOXONE },
 	{ 0x15e4, 0x3f00, "Power A Mini Pro Elite", 0, XTYPE_XBOX360 },
 	{ 0x15e4, 0x3f0a, "Xbox Airflo wired controller", 0, XTYPE_XBOX360 },
 	{ 0x15e4, 0x3f10, "Batarang Xbox 360 controller", 0, XTYPE_XBOX360 },
@@ -1394,20 +1393,10 @@ static void xpad_set_up_abs(struct input_dev *input_dev, signed short abs)
 
 static void xpad_deinit_input(struct usb_xpad *xpad)
 {
-	struct usb_device *udev = interface_to_usbdev(intf);
-	struct usb_xpad *xpad;
-	struct input_dev *input_dev;
-	struct usb_endpoint_descriptor *ep_irq_in;
-	int ep_irq_in_idx;
-	int i, error;
-
-	if (intf->cur_altsetting->desc.bNumEndpoints != 2)
-		return -ENODEV;
-
-	for (i = 0; xpad_device[i].idVendor; i++) {
-		if ((le16_to_cpu(udev->descriptor.idVendor) == xpad_device[i].idVendor) &&
-		    (le16_to_cpu(udev->descriptor.idProduct) == xpad_device[i].idProduct))
-			break;
+	if (xpad->input_created) {
+		xpad->input_created = false;
+		xpad_led_disconnect(xpad);
+		input_unregister_device(xpad->dev);
 	}
 }
 
