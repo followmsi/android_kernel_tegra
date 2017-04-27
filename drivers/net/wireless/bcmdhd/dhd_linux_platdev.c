@@ -28,6 +28,7 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
+#include <linux/wlan_plat.h>
 #include <bcmutils.h>
 #include <linux_osl.h>
 #include <dhd_dbg.h>
@@ -36,6 +37,7 @@
 #include <dhd_bus.h>
 #include <dhd_linux.h>
 #include <wl_android.h>
+#include <dynamic.h>
 
 #define WIFI_PLAT_NAME		"bcmdhd_wlan"
 #define WIFI_PLAT_NAME2		"bcm4329_wlan"
@@ -222,8 +224,8 @@ int wifi_platform_get_mac_addr(wifi_adapter_info_t *adapter, unsigned char *buf)
 	return -EOPNOTSUPP;
 }
 
-void *wifi_platform_get_country_code(wifi_adapter_info_t *adapter, char *ccode,
-				     u32 flags)
+void *wifi_platform_get_country_code(wifi_adapter_info_t *adapter, char *ccode
+				     )
 {
 	/* get_country_code was added after 2.6.39 */
 #if	(LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39))
@@ -235,7 +237,7 @@ void *wifi_platform_get_country_code(wifi_adapter_info_t *adapter, char *ccode,
 
 	DHD_TRACE(("%s\n", __FUNCTION__));
 	if (plat_data->get_country_code) {
-		return plat_data->get_country_code(plat_data, ccode, flags);
+		return plat_data->get_country_code(plat_data, ccode, 0);
 	}
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39)) */
 
@@ -270,6 +272,7 @@ static int wifi_plat_dev_drv_probe(struct platform_device *pdev)
 	if (!error) {
 		/* Still one adapter for now */
 		dhd_wifi_platdata->adapters = adapter;
+		resource = platform_get_resource_byname(pdev, IORESOURCE_IRQ, "bcmdhd_wlan_irq");
 	} else if (error != -ENXIO) {
 		return error;
 	} else if (pdev_id && pdev_id->driver_data) {
@@ -654,11 +657,15 @@ static int dhd_wifi_platform_load_usb(void)
 	return 0;
 }
 
+/* net_if_lock lock protects platform driver probe from IFUP */
+DEFINE_MUTEX(net_if_lock);
+
 static int dhd_wifi_platform_load()
 {
 	int err = 0;
 
-		wl_android_init();
+	mutex_lock(&net_if_lock);
+	wl_android_init();
 
 	if ((err = dhd_wifi_platform_load_usb()))
 		goto end;
@@ -672,6 +679,8 @@ end:
 		wl_android_exit();
 	else
 		wl_android_post_init();
+
+	mutex_unlock(&net_if_lock);
 
 	return err;
 }
