@@ -1,7 +1,7 @@
 /*
  * SDIO access interface for drivers - linux specific (pci only)
  *
- * Copyright (C) 1999-2015, Broadcom Corporation
+ * Copyright (C) 1999-2014, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -34,6 +34,9 @@
 #include <linuxver.h>
 #include <linux/pci.h>
 #include <linux/completion.h>
+#ifdef DHD_WAKE_STATUS
+#include <linux/wakeup_reason.h>
+#endif
 
 #include <osl.h>
 #include <pcicfg.h>
@@ -48,10 +51,6 @@ extern void dhdsdio_isr(void * args);
 #include <linux/platform_data/gpio-odin.h>
 #endif /* defined(CONFIG_ARCH_ODIN) */
 #include <dhd_linux.h>
-
-#ifdef	CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
-#include "dhd_custom_sysfs_tegra.h"
-#endif
 
 /* driver info, initialized when bcmsdh_register is called */
 static bcmsdh_driver_t drvinfo = {NULL, NULL, NULL, NULL};
@@ -81,6 +80,7 @@ typedef struct bcmsdh_os_info {
 	void			*context;	/* context returned from upper layer */
 	void			*sdioh;		/* handle to lower layer (sdioh) */
 	void			*dev;		/* handle to the underlying device */
+	void			*adapter;	/* handle to adapter */
 	bool			dev_wake_enabled;
 } bcmsdh_os_info_t;
 
@@ -159,6 +159,7 @@ void* bcmsdh_probe(osl_t *osh, void *dev, void *sdioh, void *adapter_info, uint 
 	bcmsdh->os_cxt = bcmsdh_osinfo;
 	bcmsdh_osinfo->sdioh = sdioh;
 	bcmsdh_osinfo->dev = dev;
+	bcmsdh_osinfo->adapter = adapter_info;
 	osl_set_bus_handle(osh, bcmsdh);
 
 #if !defined(CONFIG_HAS_WAKELOCK) && (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 36))
@@ -187,11 +188,10 @@ void* bcmsdh_probe(osl_t *osh, void *dev, void *sdioh, void *adapter_info, uint 
 		goto err;
 	}
 
-#ifdef	CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
-	if (tegra_sysfs_register(dev) < 0) {
-		pr_err("%s: tegra_sysfs_register() failed\n", __func__);
-		goto err;
-	}
+#ifdef DHD_WAKE_STATUS
+	bcmsdh->wake_irq = wifi_platform_get_wake_irq(adapter_info);
+	if (bcmsdh->wake_irq == -1)
+		bcmsdh->wake_irq = bcmsdh_osinfo->oob_irq_num;
 #endif
 	return bcmsdh;
 
@@ -208,11 +208,6 @@ int bcmsdh_remove(bcmsdh_info_t *bcmsdh)
 {
 	bcmsdh_os_info_t *bcmsdh_osinfo = bcmsdh->os_cxt;
 
-#ifdef	CONFIG_BCMDHD_CUSTOM_SYSFS_TEGRA
-	if (bcmsdh_osinfo->dev)
-		tegra_sysfs_unregister(bcmsdh_osinfo->dev);
-#endif
-
 #if !defined(CONFIG_HAS_WAKELOCK) && (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 36))
 	if (bcmsdh_osinfo->dev)
 		device_init_wakeup(bcmsdh_osinfo->dev, false);
@@ -226,18 +221,54 @@ int bcmsdh_remove(bcmsdh_info_t *bcmsdh)
 	return 0;
 }
 
+#ifdef DHD_WAKE_STATUS
+int bcmsdh_get_total_wake(bcmsdh_info_t *bcmsdh)
+{
+	return bcmsdh->total_wake_count;
+}
+
+int bcmsdh_set_get_wake(bcmsdh_info_t *bcmsdh, int flag)
+{
+	bcmsdh_os_info_t *bcmsdh_osinfo = bcmsdh->os_cxt;
+	unsigned long flags;
+	int ret;
+
+	spin_lock_irqsave(&bcmsdh_osinfo->oob_irq_spinlock, flags);
+
+	ret = bcmsdh->pkt_wake;
+	bcmsdh->total_wake_count += flag;
+	bcmsdh->pkt_wake = flag;
+
+	spin_unlock_irqrestore(&bcmsdh_osinfo->oob_irq_spinlock, flags);
+	return ret;
+}
+#endif
+
 int bcmsdh_suspend(bcmsdh_info_t *bcmsdh)
 {
 	bcmsdh_os_info_t *bcmsdh_osinfo = bcmsdh->os_cxt;
 
 	if (drvinfo.suspend && drvinfo.suspend(bcmsdh_osinfo->context))
 		return -EBUSY;
+#ifdef CONFIG_PARTIALRESUME
+	wifi_process_partial_resume(bcmsdh_osinfo->adapter, WIFI_PR_INIT);
+#endif
 	return 0;
 }
 
 int bcmsdh_resume(bcmsdh_info_t *bcmsdh)
 {
 	bcmsdh_os_info_t *bcmsdh_osinfo = bcmsdh->os_cxt;
+
+#ifdef DHD_WAKE_STATUS
+	if (check_wakeup_reason(bcmsdh->wake_irq)) {
+#ifdef CONFIG_PARTIALRESUME
+		wifi_process_partial_resume(bcmsdh_osinfo->adapter,
+					    WIFI_PR_NOTIFY_RESUME);
+#endif
+		bcmsdh_set_get_wake(bcmsdh, 1);
+	}
+#endif
 
 	if (drvinfo.resume)
 		return drvinfo.resume(bcmsdh_osinfo->context);
@@ -367,9 +398,10 @@ int bcmsdh_oob_intr_register(bcmsdh_info_t *bcmsdh, bcmsdh_cb_fn_t oob_irq_handl
 		SDLX_MSG(("%s: request_irq failed with %d\n", __FUNCTION__, err));
 		return err;
 	}
-	err = enable_irq_wake(bcmsdh_osinfo->oob_irq_num);
-	if (!err)
-		bcmsdh_osinfo->oob_irq_wake_enabled = TRUE;
+
+		err = enable_irq_wake(bcmsdh_osinfo->oob_irq_num);
+		if (!err)
+			bcmsdh_osinfo->oob_irq_wake_enabled = TRUE;
 	bcmsdh_osinfo->oob_irq_enabled = TRUE;
 	bcmsdh_osinfo->oob_irq_registered = TRUE;
 	return err;

@@ -45,13 +45,10 @@
 #define DHD_EVENT(args)		do {if (dhd_msg_level & DHD_EVENT_VAL) printf args;} while (0)
 #define DHD_BTA(args)		do {if (dhd_msg_level & DHD_BTA_VAL) printf args;} while (0)
 #define DHD_RING(args)		do {if (dhd_msg_level & DHD_RING_VAL) printf args;} while (0)
-#define DHD_ISCAN(args)		do {if (dhd_msg_level & DHD_ISCAN_VAL) printf args;} while (0)
 #define DHD_ARPOE(args)		do {if (dhd_msg_level & DHD_ARPOE_VAL) printf args;} while (0)
 #define DHD_REORDER(args)	do {if (dhd_msg_level & DHD_REORDER_VAL) printf args;} while (0)
 #define DHD_PNO(args)		do {if (dhd_msg_level & DHD_PNO_VAL) printf args;} while (0)
 #define DHD_RTT(args)		do {if (dhd_msg_level & DHD_RTT_VAL) printf args;} while (0)
-#define DHD_PKT_MON(args)	do {if (dhd_msg_level & DHD_PKT_MON_VAL) printf args;} while (0)
-#define DHD_FWLOG(args)		do {if (dhd_msg_level & DHD_FWLOG_VAL) printf args;} while (0)
 
 #define DHD_TRACE_HW4	DHD_TRACE
 
@@ -72,10 +69,7 @@
 #define DHD_REORDER_ON()	(dhd_msg_level & DHD_REORDER_VAL)
 #define DHD_NOCHECKDIED_ON()	(dhd_msg_level & DHD_NOCHECKDIED_VAL)
 #define DHD_PNO_ON()		(dhd_msg_level & DHD_PNO_VAL)
-#define DHD_FWLOG_ON()		(dhd_msg_level & DHD_FWLOG_VAL)
 #define DHD_RTT_ON()		(dhd_msg_level & DHD_RTT_VAL)
-#define DHD_PKT_MON_ON()	(dhd_msg_level & DHD_PKT_MON_VAL)
-#define DHD_PKT_MON_DUMP_ON()	(dhd_msg_level & DHD_PKT_MON_DUMP_VAL)
 
 #else /* defined(BCMDBG) || defined(DHD_DEBUG) */
 
@@ -95,7 +89,6 @@
 #define DHD_ARPOE(args)
 #define DHD_REORDER(args)
 #define DHD_PNO(args)
-#define DHD_PKT_MON(args)
 
 #define DHD_TRACE_HW4	DHD_TRACE
 
@@ -117,8 +110,6 @@
 #define DHD_NOCHECKDIED_ON()	0
 #define DHD_PNO_ON()		0
 #define DHD_RTT_ON()		0
-#define DHD_PKT_MON_ON()	0
-#define DHD_PKT_MON_DUMP_ON()	0
 #endif
 
 #define DHD_LOG(args)
