@@ -871,6 +871,7 @@ static int ion_debug_pid_show(struct seq_file *s, void *unused)
 	struct ion_device *dev = p->dev;
 	struct rb_node *n;
 	struct ion_debugfs_handle_header header;
+	struct ion_debugfs_handle_entry entry;
 
 	header.version = 1;
 	/*
@@ -883,11 +884,12 @@ static int ion_debug_pid_show(struct seq_file *s, void *unused)
 	if (seq_write(s, &header, sizeof(header)))
 		return 0;
 
+	memset(&entry, 0, sizeof(entry));
+
 	mutex_lock(&dev->buffer_lock);
 	for (n = rb_first(&dev->buffers); n; n = rb_next(n)) {
 		struct ion_buffer *buffer = rb_entry(n, struct ion_buffer,
 				node);
-		struct ion_debugfs_handle_entry entry;
 
 		if (buffer->pid != p->pid)
 			continue;

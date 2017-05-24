@@ -563,6 +563,13 @@ nouveau_do_suspend(struct drm_device *dev, bool runtime)
 	struct nouveau_cli *cli;
 	int ret;
 
+	if (time_before_eq(jiffies, drm->recovery_delay)) {
+		NV_INFO(drm, "Recovery in progress, aborting suspend...\n");
+		return -EBUSY;
+	} else {
+		drm->recovery_delay = 0;
+	}
+
 	if (dev->mode_config.num_crtc) {
 		NV_INFO(drm, "suspending console...\n");
 		nouveau_fbcon_set_suspend(dev, 1);
@@ -579,13 +586,13 @@ nouveau_do_suspend(struct drm_device *dev, bool runtime)
 
 	NV_INFO(drm, "waiting for kernel channels to go idle...\n");
 	if (drm->cechan) {
-		ret = nouveau_channel_idle(drm->cechan);
+		ret = nouveau_channel_idle_suspend(drm->cechan);
 		if (ret)
 			goto fail_display;
 	}
 
 	if (drm->channel) {
-		ret = nouveau_channel_idle(drm->channel);
+		ret = nouveau_channel_idle_suspend(drm->channel);
 		if (ret)
 			goto fail_display;
 	}
@@ -618,7 +625,7 @@ nouveau_do_suspend(struct drm_device *dev, bool runtime)
 			list_for_each_entry(chan, &abi16->channels, head) {
 				if (chan->chan->faulty)
 					continue;
-				ret = nouveau_channel_idle(chan->chan);
+				ret = nouveau_channel_idle_suspend(chan->chan);
 				if (ret) {
 					mutex_unlock(&cli->mutex);
 					goto fail_display;
