@@ -319,7 +319,7 @@ struct binder_proc {
 	int max_threads;
 	int requested_threads;
 	int requested_threads_started;
-	int ready_threads;
+	atomic_t ready_threads;
 	long default_priority;
 	struct dentry *debugfs_entry;
 };
@@ -329,7 +329,6 @@ enum {
 	BINDER_LOOPER_STATE_ENTERED     = 0x02,
 	BINDER_LOOPER_STATE_EXITED      = 0x04,
 	BINDER_LOOPER_STATE_INVALID     = 0x08,
-	BINDER_LOOPER_STATE_WAITING     = 0x10,
 	BINDER_LOOPER_STATE_NEED_RETURN = 0x20
 };
 
@@ -433,6 +432,20 @@ static inline void binder_lock(const char *tag)
 	mutex_lock(&binder_main_lock);
 	preempt_disable();
 	trace_binder_locked(tag);
+}
+
+static inline int __must_check binder_lock_interruptible(const char *tag)
+{
+	int error;
+
+	trace_binder_lock(tag);
+	error = mutex_lock_interruptible(&binder_main_lock);
+	if (error)
+		return error;
+	preempt_disable();
+	trace_binder_locked(tag);
+
+	return 0;
 }
 
 static inline void binder_unlock(const char *tag)
@@ -2161,7 +2174,7 @@ static int binder_thread_write(struct binder_proc *proc,
 			if (get_user_preempt_disabled(cookie, (binder_uintptr_t __user *)ptr))
 				return -EFAULT;
 
-			ptr += sizeof(void *);
+			ptr += sizeof(cookie);
 			list_for_each_entry(w, &proc->delivered_death, entry) {
 				struct binder_ref_death *tmp_death = container_of(w, struct binder_ref_death, work);
 
@@ -2229,7 +2242,8 @@ static int binder_has_thread_work(struct binder_thread *thread)
 static int binder_thread_read(struct binder_proc *proc,
 			      struct binder_thread *thread,
 			      binder_uintptr_t binder_buffer, size_t size,
-			      binder_size_t *consumed, int non_block)
+			      binder_size_t *consumed, int non_block,
+			      bool *binder_unlocked)
 {
 	void __user *buffer = (void __user *)(uintptr_t)binder_buffer;
 	void __user *ptr = buffer + *consumed;
@@ -2243,6 +2257,8 @@ static int binder_thread_read(struct binder_proc *proc,
 			return -EFAULT;
 		ptr += sizeof(uint32_t);
 	}
+
+	thread->looper &= ~BINDER_LOOPER_STATE_NEED_RETURN;
 
 retry:
 	wait_for_proc_work = thread->transaction_stack == NULL &&
@@ -2267,9 +2283,8 @@ retry:
 	}
 
 
-	thread->looper |= BINDER_LOOPER_STATE_WAITING;
 	if (wait_for_proc_work)
-		proc->ready_threads++;
+		atomic_inc(&proc->ready_threads);
 
 	binder_unlock(__func__);
 
@@ -2298,14 +2313,19 @@ retry:
 			ret = wait_event_freezable(thread->wait, binder_has_thread_work(thread));
 	}
 
-	binder_lock(__func__);
-
 	if (wait_for_proc_work)
-		proc->ready_threads--;
-	thread->looper &= ~BINDER_LOOPER_STATE_WAITING;
+		atomic_dec(&proc->ready_threads);
 
-	if (ret)
+	if (!ret) {
+		ret = binder_lock_interruptible(__func__);
+		if (ret == -EINTR)
+			ret = -ERESTARTSYS;
+	}
+
+	if (ret) {
+		*binder_unlocked = true;
 		return ret;
+	}
 
 	while (1) {
 		uint32_t cmd;
@@ -2536,7 +2556,7 @@ retry:
 done:
 
 	*consumed = ptr - buffer;
-	if (proc->requested_threads + proc->ready_threads == 0 &&
+	if (proc->requested_threads + atomic_read(&proc->ready_threads) == 0 &&
 	    proc->requested_threads_started < proc->max_threads &&
 	    (thread->looper & (BINDER_LOOPER_STATE_REGISTERED |
 	     BINDER_LOOPER_STATE_ENTERED)) /* the user-space code fails to */
@@ -2602,9 +2622,10 @@ static void binder_release_work(struct list_head *list)
 
 }
 
-static struct binder_thread *binder_get_thread(struct binder_proc *proc)
+static struct binder_thread *binder_get_thread(struct binder_proc *proc,
+					       bool create)
 {
-	struct binder_thread *thread = NULL;
+	struct binder_thread *thread;
 	struct rb_node *parent = NULL;
 	struct rb_node **p = &proc->threads.rb_node;
 
@@ -2617,23 +2638,26 @@ static struct binder_thread *binder_get_thread(struct binder_proc *proc)
 		else if (current->pid > thread->pid)
 			p = &(*p)->rb_right;
 		else
-			break;
+			return thread;
 	}
-	if (*p == NULL) {
-		thread = kzalloc_preempt_disabled(sizeof(*thread));
-		if (thread == NULL)
-			return NULL;
-		binder_stats_created(BINDER_STAT_THREAD);
-		thread->proc = proc;
-		thread->pid = current->pid;
-		init_waitqueue_head(&thread->wait);
-		INIT_LIST_HEAD(&thread->todo);
-		rb_link_node(&thread->rb_node, parent, p);
-		rb_insert_color(&thread->rb_node, &proc->threads);
-		thread->looper |= BINDER_LOOPER_STATE_NEED_RETURN;
-		thread->return_error = BR_OK;
-		thread->return_error2 = BR_OK;
-	}
+
+	if (!create)
+		return NULL;
+
+	thread = kzalloc_preempt_disabled(sizeof(*thread));
+	if (!thread)
+		return NULL;
+
+	binder_stats_created(BINDER_STAT_THREAD);
+	thread->proc = proc;
+	thread->pid = current->pid;
+	init_waitqueue_head(&thread->wait);
+	INIT_LIST_HEAD(&thread->todo);
+	rb_link_node(&thread->rb_node, parent, p);
+	rb_insert_color(&thread->rb_node, &proc->threads);
+	thread->return_error = BR_OK;
+	thread->return_error2 = BR_OK;
+
 	return thread;
 }
 
@@ -2678,21 +2702,45 @@ static int binder_free_thread(struct binder_proc *proc,
 	return active_transactions;
 }
 
+static int binder_free_current_thread(struct binder_proc *proc)
+{
+	struct binder_thread *thread;
+
+	binder_lock(__func__);
+
+	thread = binder_get_thread(proc, false);
+	if (thread) {
+		binder_debug(BINDER_DEBUG_THREADS, "%d:%d exit\n",
+			     proc->pid, thread->pid);
+		binder_free_thread(proc, thread);
+	}
+
+	binder_unlock(__func__);
+
+	return 0;
+}
+
 static unsigned int binder_poll(struct file *filp,
 				struct poll_table_struct *wait)
 {
 	struct binder_proc *proc = filp->private_data;
-	struct binder_thread *thread = NULL;
+	struct binder_thread *thread;
 	int wait_for_proc_work;
 
 	binder_lock(__func__);
 
-	thread = binder_get_thread(proc);
-
-	wait_for_proc_work = thread->transaction_stack == NULL &&
-		list_empty(&thread->todo) && thread->return_error == BR_OK;
+	thread = binder_get_thread(proc, true);
+	if (thread) {
+		thread->looper &= ~BINDER_LOOPER_STATE_NEED_RETURN;
+		wait_for_proc_work = thread->transaction_stack == NULL &&
+				     list_empty(&thread->todo) &&
+				     thread->return_error == BR_OK;
+	}
 
 	binder_unlock(__func__);
+
+	if (!thread)
+		return POLLERR;
 
 	if (wait_for_proc_work) {
 		if (binder_has_proc_work(proc, thread))
@@ -2710,24 +2758,29 @@ static unsigned int binder_poll(struct file *filp,
 	return 0;
 }
 
-static int binder_ioctl_write_read(struct file *filp,
-				unsigned int cmd, unsigned long arg,
-				struct binder_thread *thread)
+static int binder_ioctl_write_read(struct binder_proc *proc,
+				   void __user *ubuf, unsigned int size,
+				   bool non_block)
 {
-	int ret = 0;
-	struct binder_proc *proc = filp->private_data;
-	unsigned int size = _IOC_SIZE(cmd);
-	void __user *ubuf = (void __user *)arg;
+	struct binder_thread *thread;
 	struct binder_write_read bwr;
+	int rd_ret = 0, wr_ret = 0, ret = 0;
+	bool binder_unlocked = false;
 
-	if (size != sizeof(struct binder_write_read)) {
-		ret = -EINVAL;
+	if (size != sizeof(struct binder_write_read))
+		return -EINVAL;
+
+	if (copy_from_user(&bwr, ubuf, sizeof(bwr)))
+		return -EFAULT;
+
+	binder_lock(__func__);
+
+	thread = binder_get_thread(proc, true);
+	if (!thread) {
+		ret = -ENOMEM;
 		goto out;
 	}
-	if (copy_from_user_preempt_disabled(&bwr, ubuf, sizeof(bwr))) {
-		ret = -EFAULT;
-		goto out;
-	}
+
 	binder_debug(BINDER_DEBUG_READ_WRITE,
 		     "%d:%d write %lld at %016llx, read %lld at %016llx\n",
 		     proc->pid, thread->pid,
@@ -2740,45 +2793,51 @@ static int binder_ioctl_write_read(struct file *filp,
 					  bwr.write_size,
 					  &bwr.write_consumed);
 		trace_binder_write_done(ret);
-		if (ret < 0) {
+		wr_ret = ret;
+		if (ret < 0)
 			bwr.read_consumed = 0;
-			if (copy_to_user_preempt_disabled(ubuf, &bwr, sizeof(bwr)))
-				ret = -EFAULT;
-			goto out;
-		}
 	}
-	if (bwr.read_size > 0) {
+
+	if (!ret && bwr.read_size > 0) {
 		ret = binder_thread_read(proc, thread, bwr.read_buffer,
 					 bwr.read_size,
 					 &bwr.read_consumed,
-					 filp->f_flags & O_NONBLOCK);
+					 non_block,
+					 &binder_unlocked);
 		trace_binder_read_done(ret);
-		if (!list_empty(&proc->todo))
+		rd_ret = ret;
+
+		/*
+		 * If binder is unlocked it might not be safe to access
+		 * the proc->todo list, so let's wake up waiter and
+		 * let it sort it all out.
+		 */
+		if (binder_unlocked || !list_empty(&proc->todo))
 			wake_up_interruptible(&proc->wait);
-		if (ret < 0) {
-			if (copy_to_user_preempt_disabled(ubuf, &bwr, sizeof(bwr)))
-				ret = -EFAULT;
-			goto out;
-		}
 	}
+
 	binder_debug(BINDER_DEBUG_READ_WRITE,
-		     "%d:%d wrote %lld of %lld, read return %lld of %lld\n",
+		     "%d:%d wrote %lld of %lld (%d), read return %lld of %lld (%d)\n",
 		     proc->pid, thread->pid,
-		     (u64)bwr.write_consumed, (u64)bwr.write_size,
-		     (u64)bwr.read_consumed, (u64)bwr.read_size);
-	if (copy_to_user_preempt_disabled(ubuf, &bwr, sizeof(bwr))) {
-		ret = -EFAULT;
-		goto out;
-	}
+		     (u64)bwr.write_consumed, (u64)bwr.write_size, wr_ret,
+		     (u64)bwr.read_consumed, (u64)bwr.read_size, rd_ret);
+
 out:
+	if (!binder_unlocked)
+		binder_unlock(__func__);
+
+	if (copy_to_user(ubuf, &bwr, sizeof(bwr)))
+		ret = -EFAULT;
+
 	return ret;
 }
 
-static int binder_ioctl_set_ctx_mgr(struct file *filp)
+static int binder_ioctl_set_ctx_mgr(struct binder_proc *proc)
 {
 	int ret = 0;
-	struct binder_proc *proc = filp->private_data;
 	kuid_t curr_euid = current_euid();
+
+	binder_lock(__func__);
 
 	if (binder_context_mgr_node != NULL) {
 		pr_err("BINDER_SET_CONTEXT_MGR already set\n");
@@ -2810,6 +2869,7 @@ static int binder_ioctl_set_ctx_mgr(struct file *filp)
 	binder_context_mgr_node->has_strong_ref = 1;
 	binder_context_mgr_node->has_weak_ref = 1;
 out:
+	binder_unlock(__func__);
 	return ret;
 }
 
@@ -2817,7 +2877,6 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	int ret;
 	struct binder_proc *proc = filp->private_data;
-	struct binder_thread *thread;
 	unsigned int size = _IOC_SIZE(cmd);
 	void __user *ubuf = (void __user *)arg;
 
@@ -2828,66 +2887,51 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	ret = wait_event_interruptible(binder_user_error_wait, binder_stop_on_user_error < 2);
 	if (ret)
-		goto err_unlocked;
-
-	binder_lock(__func__);
-	thread = binder_get_thread(proc);
-	if (thread == NULL) {
-		ret = -ENOMEM;
 		goto err;
-	}
 
 	switch (cmd) {
 	case BINDER_WRITE_READ:
-		ret = binder_ioctl_write_read(filp, cmd, arg, thread);
-		if (ret)
-			goto err;
+		ret = binder_ioctl_write_read(proc, ubuf, size,
+					      filp->f_flags & O_NONBLOCK);
 		break;
-	case BINDER_SET_MAX_THREADS:
-		if (copy_from_user_preempt_disabled(&proc->max_threads, ubuf, sizeof(proc->max_threads))) {
-			ret = -EINVAL;
-			goto err;
+	case BINDER_SET_MAX_THREADS: {
+		int max_threads;
+
+		ret = get_user(max_threads, (int __user *)ubuf) ? -EINVAL : 0;
+		if (!ret) {
+			binder_lock(__func__);
+			proc->max_threads = max_threads;
+			binder_unlock(__func__);
 		}
 		break;
+	}
 	case BINDER_SET_CONTEXT_MGR:
-		ret = binder_ioctl_set_ctx_mgr(filp);
-		if (ret)
-			goto err;
+		ret = binder_ioctl_set_ctx_mgr(proc);
 		break;
 	case BINDER_THREAD_EXIT:
-		binder_debug(BINDER_DEBUG_THREADS, "%d:%d exit\n",
-			     proc->pid, thread->pid);
-		binder_free_thread(proc, thread);
-		thread = NULL;
+		ret = binder_free_current_thread(proc);
 		break;
 	case BINDER_VERSION: {
 		struct binder_version __user *ver = ubuf;
 
-		if (size != sizeof(struct binder_version)) {
+		if (size != sizeof(struct binder_version))
 			ret = -EINVAL;
-			goto err;
-		}
-
-		if (put_user_preempt_disabled(BINDER_CURRENT_PROTOCOL_VERSION,
-			     &ver->protocol_version)) {
+		else if (put_user(BINDER_CURRENT_PROTOCOL_VERSION,
+				  &ver->protocol_version))
 			ret = -EINVAL;
-			goto err;
-		}
+		else
+			ret = 0;
 		break;
 	}
 	default:
 		ret = -EINVAL;
-		goto err;
+		break;
 	}
-	ret = 0;
-err:
-	if (thread)
-		thread->looper &= ~BINDER_LOOPER_STATE_NEED_RETURN;
-	binder_unlock(__func__);
+
 	wait_event_interruptible(binder_user_error_wait, binder_stop_on_user_error < 2);
 	if (ret && ret != -ERESTARTSYS)
 		pr_info("%d:%d ioctl %x %lx returned %d\n", proc->pid, current->pid, cmd, arg, ret);
-err_unlocked:
+err:
 	trace_binder_ioctl_done(ret);
 	return ret;
 }
@@ -2937,7 +2981,7 @@ static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
 	const char *failure_string;
 	struct binder_buffer *buffer;
 
-	if (proc->tsk != current)
+	if (proc->tsk != current->group_leader)
 		return -EINVAL;
 
 	if ((vma->vm_end - vma->vm_start) > SZ_4M)
@@ -3042,8 +3086,8 @@ static int binder_open(struct inode *nodp, struct file *filp)
 	proc = kzalloc(sizeof(*proc), GFP_KERNEL);
 	if (proc == NULL)
 		return -ENOMEM;
-	get_task_struct(current);
-	proc->tsk = current;
+	get_task_struct(current->group_leader);
+	proc->tsk = current->group_leader;
 	INIT_LIST_HEAD(&proc->todo);
 	init_waitqueue_head(&proc->wait);
 	proc->default_priority = task_nice(current);
@@ -3087,16 +3131,14 @@ static void binder_deferred_flush(struct binder_proc *proc)
 		struct binder_thread *thread = rb_entry(n, struct binder_thread, rb_node);
 
 		thread->looper |= BINDER_LOOPER_STATE_NEED_RETURN;
-		if (thread->looper & BINDER_LOOPER_STATE_WAITING) {
-			wake_up_interruptible(&thread->wait);
-			wake_count++;
-		}
+		wake_up(&thread->wait);
+		wake_count++;
 	}
 	wake_up_interruptible_all(&proc->wait);
 
 	binder_debug(BINDER_DEBUG_OPEN_CLOSE,
-		     "binder_flush: %d woke %d threads\n", proc->pid,
-		     wake_count);
+		     "binder_flush: %d attempted to wake %d threads\n",
+		     proc->pid, wake_count);
 }
 
 static int binder_release(struct inode *nodp, struct file *filp)
@@ -3594,7 +3636,8 @@ static void print_binder_proc_stats(struct seq_file *m,
 			"  ready threads %d\n"
 			"  free async space %zd\n", proc->requested_threads,
 			proc->requested_threads_started, proc->max_threads,
-			proc->ready_threads, proc->free_async_space);
+			atomic_read(&proc->ready_threads),
+			proc->free_async_space);
 	count = 0;
 	for (n = rb_first(&proc->nodes); n != NULL; n = rb_next(n))
 		count++;

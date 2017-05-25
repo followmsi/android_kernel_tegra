@@ -8,25 +8,23 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/mm.h>
 #include <linux/slab.h>
-#include <linux/vmalloc.h>
 #include <linux/lz4.h>
+#include <linux/vmalloc.h>
+#include <linux/mm.h>
 
 #include "zcomp_lz4.h"
 
-static void *zcomp_lz4_create(void)
+static void *zcomp_lz4_create(gfp_t flags)
 {
-	void *buf;
-	size_t size = LZ4_MEM_COMPRESS;
+	void *ret;
 
-	/* fallback to vmalloc allocation */
-	buf = kzalloc(size, GFP_KERNEL | __GFP_NORETRY | __GFP_NOWARN);
-	if (!buf && size > PAGE_SIZE) {
-		buf = vmalloc(size);
-		memset(buf, 0, size);
-	}
-	return buf;
+	ret = kmalloc(LZ4_MEM_COMPRESS, flags);
+	if (!ret)
+		ret = __vmalloc(LZ4_MEM_COMPRESS,
+				flags | __GFP_HIGHMEM,
+				PAGE_KERNEL);
+	return ret;
 }
 
 static void zcomp_lz4_destroy(void *private)

@@ -4,7 +4,7 @@
 #include "nouveau_agp.h"
 #include "nouveau_reg.h"
 
-#if __OS_HAS_AGP
+#if IS_ENABLED(CONFIG_AGP)
 MODULE_PARM_DESC(agpmode, "AGP mode (0 to disable AGP)");
 static int nouveau_agpmode = -1;
 module_param_named(agpmode, nouveau_agpmode, int, 0400);
@@ -101,7 +101,7 @@ nouveau_agp_enabled(struct nouveau_drm *drm)
 void
 nouveau_agp_reset(struct nouveau_drm *drm)
 {
-#if __OS_HAS_AGP
+#if IS_ENABLED(CONFIG_AGP)
 	struct nvif_device *device = &drm->device;
 	struct drm_device *dev = drm->dev;
 	u32 save[2];
@@ -147,7 +147,7 @@ nouveau_agp_reset(struct nouveau_drm *drm)
 void
 nouveau_agp_init(struct nouveau_drm *drm)
 {
-#if __OS_HAS_AGP
+#if IS_ENABLED(CONFIG_AGP)
 	struct drm_device *dev = drm->dev;
 	struct drm_agp_info info;
 	struct drm_agp_mode mode;
@@ -187,7 +187,7 @@ nouveau_agp_init(struct nouveau_drm *drm)
 void
 nouveau_agp_fini(struct nouveau_drm *drm)
 {
-#if __OS_HAS_AGP
+#if IS_ENABLED(CONFIG_AGP)
 	struct drm_device *dev = drm->dev;
 	if (dev->agp && dev->agp->acquired)
 		drm_agp_release(dev);

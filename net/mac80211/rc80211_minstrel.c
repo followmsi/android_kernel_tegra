@@ -374,7 +374,7 @@ minstrel_get_rate(void *priv, struct ieee80211_sta *sta,
 		rate++;
 		mi->sample_deferred++;
 	} else {
-		if (!msr->sample_limit != 0)
+		if (!msr->sample_limit)
 			return;
 
 		mi->sample_packets++;

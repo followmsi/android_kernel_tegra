@@ -137,7 +137,7 @@ struct scan_control {
 /*
  * From 0 .. 100.  Higher means more swappy.
  */
-int vm_swappiness = 60;
+int vm_swappiness = 15;
 /*
  * The total number of pages which are beyond the high watermark within all
  * zones.
@@ -166,13 +166,14 @@ static bool global_reclaim(struct scan_control *sc)
 
 static unsigned long zone_reclaimable_pages(struct zone *zone)
 {
-	unsigned long pages_min;
+	u64 pages_min = min_filelist_kbytes >> (PAGE_SHIFT - 10);
 	int nr;
 
 	nr = zone_page_state(zone, NR_ACTIVE_FILE) +
 	     zone_page_state(zone, NR_INACTIVE_FILE);
 
-	pages_min = min_filelist_kbytes >> (PAGE_SHIFT - 10);
+	pages_min *= zone->managed_pages;
+	do_div(pages_min, totalram_pages);
 	if (nr < pages_min)
 		nr = 0;
 
@@ -1905,13 +1906,16 @@ static int inactive_list_is_low(struct lruvec *lruvec, enum lru_list lru)
  */
 static int file_is_low(struct lruvec *lruvec)
 {
-	unsigned long pages_min, active, inactive;
+	unsigned long active, inactive;
 	struct zone *zone = lruvec_zone(lruvec);
+	u64 pages_min = min_filelist_kbytes >> (PAGE_SHIFT - 10);
 
 	if (!mem_cgroup_disabled())
 		return false;
 
-	pages_min = min_filelist_kbytes >> (PAGE_SHIFT - 10);
+	pages_min *= zone->managed_pages;
+	do_div(pages_min, totalram_pages);
+
 	active = zone_page_state(zone, NR_ACTIVE_FILE);
 	inactive = zone_page_state(zone, NR_INACTIVE_FILE);
 
@@ -2975,6 +2979,10 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int classzone_idx)
 static bool prepare_kswapd_sleep(pg_data_t *pgdat, int order, long remaining,
 					int classzone_idx)
 {
+	/* If kswapd has been running too long, just sleep */
+	if (need_resched())
+		return false;
+
 	/* If a direct reclaimer woke kswapd within HZ/10, it's premature */
 	if (remaining)
 		return false;

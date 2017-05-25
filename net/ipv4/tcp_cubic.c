@@ -157,14 +157,20 @@ static void bictcp_init(struct sock *sk)
 static void bictcp_cwnd_event(struct sock *sk, enum tcp_ca_event event)
 {
 	if (event == CA_EVENT_TX_START) {
-		s32 delta = tcp_time_stamp - tcp_sk(sk)->lsndtime;
 		struct bictcp *ca = inet_csk_ca(sk);
+		u32 now = tcp_time_stamp;
+		s32 delta;
+
+		delta = now - tcp_sk(sk)->lsndtime;
 
 		/* We were application limited (idle) for a while.
 		 * Shift epoch_start to keep cwnd growth to cubic curve.
 		 */
-		if (ca->epoch_start && delta > 0)
+		if (ca->epoch_start && delta > 0) {
 			ca->epoch_start += delta;
+			if (after(ca->epoch_start, now))
+				ca->epoch_start = now;
+		}
 		return;
 	}
 }
@@ -230,6 +236,13 @@ static inline void bictcp_update(struct bictcp *ca, u32 cwnd)
 	if (ca->last_cwnd == cwnd &&
 	    (s32)(tcp_time_stamp - ca->last_time) <= HZ / 32)
 		return;
+
+	/* The CUBIC function can update ca->cnt at most once per jiffy.
+	 * On all cwnd reduction events, ca->epoch_start is set to 0,
+	 * which will force a recalculation of ca->cnt.
+	 */
+	if (ca->epoch_start && tcp_time_stamp == ca->last_time)
+		goto tcp_friendliness;
 
 	ca->last_cwnd = cwnd;
 	ca->last_time = tcp_time_stamp;
@@ -298,6 +311,7 @@ static inline void bictcp_update(struct bictcp *ca, u32 cwnd)
 	if (ca->last_max_cwnd == 0 && ca->cnt > 20)
 		ca->cnt = 20;	/* increase cwnd 5% per RTT */
 
+tcp_friendliness:
 	/* TCP Friendly */
 	if (tcp_friendliness) {
 		u32 scale = beta_scale;
