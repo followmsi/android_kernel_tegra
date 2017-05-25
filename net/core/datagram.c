@@ -744,7 +744,8 @@ __sum16 __skb_checksum_complete_head(struct sk_buff *skb, int len)
 		    !skb->csum_complete_sw)
 			netdev_rx_csum_fault(skb->dev);
 	}
-	skb->csum_valid = !sum;
+	if (!skb_shared(skb))
+		skb->csum_valid = !sum;
 	return sum;
 }
 EXPORT_SYMBOL(__skb_checksum_complete_head);
@@ -764,11 +765,13 @@ __sum16 __skb_checksum_complete(struct sk_buff *skb)
 			netdev_rx_csum_fault(skb->dev);
 	}
 
-	/* Save full packet checksum */
-	skb->csum = csum;
-	skb->ip_summed = CHECKSUM_COMPLETE;
-	skb->csum_complete_sw = 1;
-	skb->csum_valid = !sum;
+	if (!skb_shared(skb)) {
+		/* Save full packet checksum */
+		skb->csum = csum;
+		skb->ip_summed = CHECKSUM_COMPLETE;
+		skb->csum_complete_sw = 1;
+		skb->csum_valid = !sum;
+	}
 
 	return sum;
 }
@@ -779,6 +782,7 @@ EXPORT_SYMBOL(__skb_checksum_complete);
  *	@skb: skbuff
  *	@hlen: hardware length
  *	@iov: io vector
+ *	@len: amount of data to copy from skb to iov
  *
  *	Caller _must_ check that skb will fit to this iovec.
  *
@@ -788,10 +792,13 @@ EXPORT_SYMBOL(__skb_checksum_complete);
  *			   can be modified!
  */
 int skb_copy_and_csum_datagram_iovec(struct sk_buff *skb,
-				     int hlen, struct iovec *iov)
+				     int hlen, struct iovec *iov, int len)
 {
 	__wsum csum;
 	int chunk = skb->len - hlen;
+
+	if (chunk > len)
+		chunk = len;
 
 	if (!chunk)
 		return 0;
