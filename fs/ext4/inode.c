@@ -3135,9 +3135,6 @@ static ssize_t ext4_ext_direct_IO(int rw, struct kiocb *iocb,
 		get_block_func = ext4_get_block_write;
 		dio_flags = DIO_LOCKING;
 	}
-#ifdef CONFIG_EXT4_FS_ENCRYPTION
-	BUG_ON(ext4_encrypted_inode(inode) && S_ISREG(inode->i_mode));
-#endif
 	ret = __blockdev_direct_IO(rw, iocb, inode,
 				   inode->i_sb->s_bdev, iter,
 				   offset,
@@ -3620,6 +3617,8 @@ int ext4_punch_hole(struct inode *inode, loff_t offset, loff_t length)
 
 	inode->i_mtime = inode->i_ctime = ext4_current_time(inode);
 	ext4_mark_inode_dirty(handle, inode);
+	if (ret >= 0)
+		ext4_update_inode_fsync_trans(handle, inode, 1);
 out_stop:
 	ext4_journal_stop(handle);
 out_dio:
