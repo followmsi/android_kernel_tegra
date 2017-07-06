@@ -423,6 +423,7 @@ struct sock {
 	void			*sk_security;
 #endif
 	__u32			sk_mark;
+	kuid_t			sk_uid;
 	u32			sk_classid;
 	struct cg_proto		*sk_cgrp;
 	void			(*sk_state_change)(struct sock *sk);
@@ -1482,7 +1483,12 @@ static inline void sk_wmem_free_skb(struct sock *sk, struct sk_buff *skb)
 
 static inline void sock_release_ownership(struct sock *sk)
 {
-	sk->sk_lock.owned = 0;
+	if (sk->sk_lock.owned) {
+		sk->sk_lock.owned = 0;
+
+		/* The sk_lock has mutex_unlock() semantics: */
+		mutex_release(&sk->sk_lock.dep_map, 1, _RET_IP_);
+	}
 }
 
 /*
@@ -1743,12 +1749,18 @@ static inline void sock_graft(struct sock *sk, struct socket *parent)
 	sk->sk_wq = parent->wq;
 	parent->sk = sk;
 	sk_set_socket(sk, parent);
+	sk->sk_uid = SOCK_INODE(parent)->i_uid;
 	security_sock_graft(sk, parent);
 	write_unlock_bh(&sk->sk_callback_lock);
 }
 
 kuid_t sock_i_uid(struct sock *sk);
 unsigned long sock_i_ino(struct sock *sk);
+
+static inline kuid_t sock_net_uid(const struct net *net, const struct sock *sk)
+{
+	return sk ? sk->sk_uid : make_kuid(net->user_ns, 0);
+}
 
 static inline struct dst_entry *
 __sk_dst_get(struct sock *sk)
