@@ -362,6 +362,9 @@ static void acc_complete_set_string(struct usb_ep *ep, struct usb_request *req)
 	if (string_dest) {
 		unsigned long flags;
 
+		if (length == 0)
+			return;
+
 		if (length >= ACC_STRING_SIZE)
 			length = ACC_STRING_SIZE - 1;
 
