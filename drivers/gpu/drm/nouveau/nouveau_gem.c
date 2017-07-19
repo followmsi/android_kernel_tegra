@@ -265,10 +265,11 @@ static void gem_unmap_work(struct work_struct *__work)
 
 	fobj = reservation_object_get_list(resv);
 
-	nouveau_bo_vma_list_lock(nvbo);
-	WARN_ON(nvbo->vma_immutable);
-	list_del(&vma->head);
-	nouveau_bo_vma_list_unlock(nvbo);
+	if (!nvbo->vma_immutable) {
+	    nouveau_bo_vma_list_lock(nvbo);
+	    list_del(&vma->head);
+	    nouveau_bo_vma_list_unlock(nvbo);
+	}
 
 	if (fobj && fobj->shared_count > 1)
 		ttm_bo_wait(&nvbo->bo, true, false, false);
@@ -310,6 +311,8 @@ nouveau_gem_object_unmap(struct nouveau_bo *nvbo, struct nvkm_vma *vma)
 {
 	struct nouveau_drm *drm = nouveau_bdev(nvbo->bo.bdev);
 	struct nouveau_vma_delete_work *del_work;
+	struct drm_device *dev = nvbo->gem.dev;
+	int ret;
 
 	/*
 	 * If the vma mapping is still deferred, and we want to free the
@@ -322,7 +325,21 @@ nouveau_gem_object_unmap(struct nouveau_bo *nvbo, struct nvkm_vma *vma)
 	if (!vma->mapped)
 	        nouveau_cancel_defer_vm_map(vma, nvbo);
 
-	del_work = (struct nouveau_vma_delete_work*) kzalloc(sizeof(*del_work), GFP_KERNEL);
+	if (nvbo->vma_immutable) {
+		ret = pm_runtime_get_sync(dev->dev);
+		WARN_ON(ret < 0 && ret != -EACCES);
+
+		if (vma->mapped)
+			WARN_ON(nvkm_vm_wait(vma->vm));
+
+		WARN(1, "vma_immutable, remove the vma from list early.\n");
+		list_del(&vma->head);
+
+		pm_runtime_mark_last_busy(dev->dev);
+		pm_runtime_put_autosuspend(dev->dev);
+	}
+
+	del_work = (struct nouveau_vma_delete_work *)kzalloc(sizeof(*del_work), GFP_KERNEL);
 	if (WARN_ON(!del_work))
 		return;
 
@@ -341,9 +358,7 @@ nouveau_gem_object_close(struct drm_gem_object *gem, struct drm_file *file_priv)
 {
 	struct nouveau_cli *cli = nouveau_cli(file_priv);
 	struct nouveau_bo *nvbo = nouveau_gem_object(gem);
-	struct nouveau_drm *drm = nouveau_bdev(nvbo->bo.bdev);
-	struct device *dev = drm->dev->dev;
-	struct nvkm_vma *vma;
+	struct nvkm_vma *vma, *n;
 	int ret;
 
 	if (!cli->vm)
@@ -355,18 +370,13 @@ nouveau_gem_object_close(struct drm_gem_object *gem, struct drm_file *file_priv)
 
 	vma = nouveau_bo_vma_find(nvbo, cli->vm);
 	if (vma) {
-		if (--vma->refcount == 0) {
-			ret = pm_runtime_get_sync(dev);
-			if (!WARN_ON(ret < 0 && ret != -EACCES)) {
+		if (--vma->refcount == 0)
+			if (!WARN_ON(ret < 0 && ret != -EACCES))
 				nouveau_gem_object_unmap(nvbo, vma);
-				pm_runtime_mark_last_busy(dev);
-				pm_runtime_put_autosuspend(dev);
-			}
-		}
 	}
 
 	nouveau_bo_vma_list_lock(nvbo);
-	list_for_each_entry(vma, &nvbo->vma_list, head)
+	list_for_each_entry_safe(vma, n, &nvbo->vma_list, head)
 		if (!vma->implicit &&
 		    (vma->vm == cli->vm) &&
 		    !vma->unmap_pending) {
