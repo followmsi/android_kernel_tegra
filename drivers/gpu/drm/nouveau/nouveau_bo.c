@@ -138,7 +138,7 @@ nouveau_bo_del_ttm(struct ttm_buffer_object *bo)
 	struct nouveau_drm *drm = nouveau_bdev(bo->bdev);
 	struct drm_device *dev = drm->dev;
 	struct nouveau_bo *nvbo = nouveau_bo(bo);
-	struct nvkm_vma *vma;
+	struct nvkm_vma *vma, *tmp;
 
 	if (unlikely(nvbo->gem.filp))
 		DRM_ERROR("bo %p still attached to GEM object\n", bo);
@@ -155,7 +155,7 @@ nouveau_bo_del_ttm(struct ttm_buffer_object *bo)
 	 * deleted safely.
 	 */
 	nouveau_bo_vma_list_lock(nvbo);
-	list_for_each_entry(vma, &nvbo->vma_list, head) {
+	list_for_each_entry_safe(vma, tmp, &nvbo->vma_list, head) {
 		DRM_INFO("Cleaning up leaked mapping offset 0x%llx\n",
 			 vma->offset);
 		if (vma->mapped)
