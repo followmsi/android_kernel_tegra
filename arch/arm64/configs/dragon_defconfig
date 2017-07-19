@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm64 3.18.0 Kernel Configuration
+# Linux/arm64 3.18.61 Kernel Configuration
 #
 CONFIG_ARM64=y
 CONFIG_64BIT=y
@@ -927,7 +927,6 @@ CONFIG_NET_SCH_FIFO=y
 # CONFIG_BATMAN_ADV is not set
 # CONFIG_OPENVSWITCH is not set
 # CONFIG_VSOCKETS is not set
-# CONFIG_NETLINK_MMAP is not set
 # CONFIG_NETLINK_DIAG is not set
 # CONFIG_NET_MPLS_GSO is not set
 # CONFIG_HSR is not set
@@ -3071,6 +3070,7 @@ CONFIG_HID_CHERRY=y
 # CONFIG_HID_LENOVO is not set
 CONFIG_HID_LOGITECH=y
 CONFIG_HID_LOGITECH_DJ=y
+# CONFIG_HID_LOGITECH_HIDPP is not set
 # CONFIG_LOGITECH_FF is not set
 # CONFIG_LOGIRUMBLEPAD2_FF is not set
 # CONFIG_LOGIG940_FF is not set
@@ -3706,7 +3706,6 @@ CONFIG_TSL2583=y
 # CONFIG_IIO_PERIODIC_RTC_TRIGGER is not set
 # CONFIG_IIO_SIMPLE_DUMMY is not set
 # CONFIG_FB_XGI is not set
-# CONFIG_BCM_WIMAX is not set
 # CONFIG_FT1000 is not set
 
 #
