@@ -198,6 +198,9 @@ tegra_throttle_set_cur_state(struct thermal_cooling_device *cdev,
 	if (bthrot->cpu_freq_table == NULL)
 		return 0;
 
+	if (cur_state > bthrot_ins->throt_tab_size)
+		return -EINVAL;
+
 	if (bthrot_ins->cur_state == cur_state)
 		return 0;
 

@@ -314,6 +314,9 @@ gk20a_volt_dvfs_set_vts_cdev_state(struct thermal_cooling_device *cdev,
 	struct gk20a_volt_priv *priv = (struct gk20a_volt_priv *)cdev->devdata;
 	struct nvkm_volt *volt = &priv->base;
 
+	if (cur_state >= MAX_THERMAL_LIMITS)
+		return -EINVAL;
+
 	mutex_lock(&volt->therm_lock);
 
 	if (priv->therm_idx == cur_state)
