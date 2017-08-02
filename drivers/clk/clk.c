@@ -558,13 +558,9 @@ unlock:
 static void clk_debug_unregister(struct clk *clk)
 {
 	mutex_lock(&clk_debug_lock);
-	if (!clk->dentry)
-		goto out;
-
 	hlist_del_init(&clk->debug_node);
 	debugfs_remove_recursive(clk->dentry);
 	clk->dentry = NULL;
-out:
 	mutex_unlock(&clk_debug_lock);
 }
 
@@ -2535,14 +2531,17 @@ int __clk_get(struct clk *clk)
 
 void __clk_put(struct clk *clk)
 {
+	struct module *owner;
+
 	if (!clk || WARN_ON_ONCE(IS_ERR(clk)))
 		return;
 
 	clk_prepare_lock();
+	owner = clk->owner;
 	kref_put(&clk->ref, __clk_release);
 	clk_prepare_unlock();
 
-	module_put(clk->owner);
+	module_put(owner);
 }
 
 /***        clk rate change notifiers        ***/

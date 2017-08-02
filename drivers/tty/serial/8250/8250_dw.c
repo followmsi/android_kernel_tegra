@@ -119,7 +119,10 @@ static void dw8250_serial_out(struct uart_port *p, int offset, int value)
 			dw8250_force_idle(p);
 			writeb(value, p->membase + (UART_LCR << p->regshift));
 		}
-		dev_err(p->dev, "Couldn't set LCR to %d\n", value);
+		/*
+		 * FIXME: this deadlocks if port->lock is already held
+		 * dev_err(p->dev, "Couldn't set LCR to %d\n", value);
+		 */
 	}
 }
 
@@ -156,7 +159,10 @@ static void dw8250_serial_out32(struct uart_port *p, int offset, int value)
 			dw8250_force_idle(p);
 			writel(value, p->membase + (UART_LCR << p->regshift));
 		}
-		dev_err(p->dev, "Couldn't set LCR to %d\n", value);
+		/*
+		 * FIXME: this deadlocks if port->lock is already held
+		 * dev_err(p->dev, "Couldn't set LCR to %d\n", value);
+		 */
 	}
 }
 
@@ -352,9 +358,19 @@ static bool dw8250_idma_filter(struct dma_chan *chan, void *param)
 static int dw8250_probe_acpi(struct uart_8250_port *up,
 			     struct dw8250_data *data)
 {
+	const struct acpi_device_id *id;
 	struct uart_port *p = &up->port;
 
 	dw8250_setup_port(up);
+
+	id = acpi_match_device(p->dev->driver->acpi_match_table, p->dev);
+	if (!id)
+		return -ENODEV;
+
+	if (!p->uartclk)
+		if (device_property_read_u32(p->dev, "clock-frequency",
+					     &p->uartclk))
+			return -EINVAL;
 
 	p->iotype = UPIO_MEM32;
 	p->serial_in = dw8250_serial_in32;
@@ -585,6 +601,8 @@ static const struct acpi_device_id dw8250_acpi_match[] = {
 	{ "INT3435", 0 },
 	{ "80860F0A", 0 },
 	{ "8086228A", 0 },
+	{ "APMC0D08", 0},
+	{ "AMD0020", 0 },
 	{ },
 };
 MODULE_DEVICE_TABLE(acpi, dw8250_acpi_match);

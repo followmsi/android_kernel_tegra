@@ -60,6 +60,7 @@ targets += cpustr.h
 $(obj)/cpustr.h: $(obj)/mkcpustr FORCE
 	$(call if_changed,cpustr)
 endif
+clean-files += cpustr.h
 
 # ---------------------------------------------------------------------------
 
@@ -168,6 +169,9 @@ isoimage: $(obj)/bzImage
 	for i in lib lib64 share end ; do \
 		if [ -f /usr/$$i/syslinux/isolinux.bin ] ; then \
 			cp /usr/$$i/syslinux/isolinux.bin $(obj)/isoimage ; \
+			if [ -f /usr/$$i/syslinux/ldlinux.c32 ]; then \
+				cp /usr/$$i/syslinux/ldlinux.c32 $(obj)/isoimage ; \
+			fi ; \
 			break ; \
 		fi ; \
 		if [ $$i = end ] ; then exit 1 ; fi ; \

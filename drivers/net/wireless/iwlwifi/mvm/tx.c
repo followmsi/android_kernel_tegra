@@ -359,6 +359,15 @@ int iwl_mvm_tx_skb_non_sta(struct iwl_mvm *mvm, struct sk_buff *skb)
 		return -1;
 	}
 
+	/*
+	 * Increase the pending frames counter, so that later when a reply comes
+	 * in and the counter is decreased - we don't start getting negative
+	 * values.
+	 * Note that we don't need to make sure it isn't agg'd, since we're
+	 * TXing non-sta
+	 */
+	atomic_inc(&mvm->pending_frames[sta_id]);
+
 	return 0;
 }
 
@@ -901,6 +910,11 @@ int iwl_mvm_rx_ba_notif(struct iwl_mvm *mvm, struct iwl_rx_cmd_buffer *rxb,
 
 	sta_id = ba_notif->sta_id;
 	tid = ba_notif->tid;
+
+	if (WARN_ONCE(sta_id >= IWL_MVM_STATION_COUNT ||
+		      tid >= IWL_MAX_TID_COUNT,
+		      "sta_id %d tid %d", sta_id, tid))
+		return 0;
 
 	rcu_read_lock();
 

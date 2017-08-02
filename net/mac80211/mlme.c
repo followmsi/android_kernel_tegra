@@ -174,6 +174,7 @@ ieee80211_determine_chantype(struct ieee80211_sub_if_data *sdata,
 	if (!(ht_cap->cap_info &
 	      cpu_to_le16(IEEE80211_HT_CAP_SUP_WIDTH_20_40))) {
 		ret = IEEE80211_STA_DISABLE_40MHZ;
+		vht_chandef = *chandef;
 		goto out;
 	}
 
@@ -3714,8 +3715,6 @@ static void ieee80211_restart_sta_timer(struct ieee80211_sub_if_data *sdata)
 		if (!(flags & IEEE80211_HW_CONNECTION_MONITOR))
 			ieee80211_queue_work(&sdata->local->hw,
 					     &sdata->u.mgd.monitor_work);
-		/* and do all the other regular work too */
-		ieee80211_queue_work(&sdata->local->hw, &sdata->work);
 	}
 }
 

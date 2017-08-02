@@ -2450,7 +2450,7 @@ sub do_run_test {
     }
 
     waitpid $child_pid, 0;
-    $child_exit = $?;
+    $child_exit = $? >> 8;
 
     if (!$bug && $in_bisect) {
 	if (defined($bisect_ret_good)) {
@@ -3571,7 +3571,9 @@ sub test_this_config {
     undef %configs;
     assign_configs \%configs, $output_config;
 
-    return $config if (!defined($configs{$config}));
+    if (!defined($configs{$config}) || $configs{$config} =~ /^#/) {
+	return $config;
+    }
 
     doprint "disabling config $config did not change .config\n";
 

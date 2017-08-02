@@ -40,7 +40,6 @@ BEGIN_FTR_SECTION;						\
 	b	1f;						\
 END_FTR_SECTION(0, 1);						\
 	ld	r12,opal_tracepoint_refcount@toc(r2);		\
-	std	r12,32(r1);					\
 	cmpdi	r12,0;						\
 	bne-	LABEL;						\
 1:
@@ -149,7 +148,7 @@ opal_tracepoint_entry:
 opal_tracepoint_return:
 	std	r3,STK_REG(R31)(r1)
 	mr	r4,r3
-	ld	r0,STK_REG(R23)(r1)
+	ld	r3,STK_REG(R23)(r1)
 	bl	__trace_opal_exit
 	ld	r3,STK_REG(R31)(r1)
 	addi	r1,r1,STACKFRAMESIZE

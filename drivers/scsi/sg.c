@@ -546,7 +546,7 @@ static ssize_t
 sg_new_read(Sg_fd * sfp, char __user *buf, size_t count, Sg_request * srp)
 {
 	sg_io_hdr_t *hp = &srp->header;
-	int err = 0;
+	int err = 0, err2;
 	int len;
 
 	if (count < SZ_SG_IO_HDR) {
@@ -575,8 +575,8 @@ sg_new_read(Sg_fd * sfp, char __user *buf, size_t count, Sg_request * srp)
 		goto err_out;
 	}
 err_out:
-	err = sg_finish_rem_req(srp);
-	return (0 == err) ? count : err;
+	err2 = sg_finish_rem_req(srp);
+	return err ? : err2 ? : count;
 }
 
 static ssize_t
@@ -591,6 +591,9 @@ sg_write(struct file *filp, const char __user *buf, size_t count, loff_t * ppos)
 	struct sg_header old_hdr;
 	sg_io_hdr_t *hp;
 	unsigned char cmnd[SG_MAX_CDB_SIZE];
+
+	if (unlikely(segment_eq(get_fs(), KERNEL_DS)))
+		return -EINVAL;
 
 	if ((!(sfp = (Sg_fd *) filp->private_data)) || (!(sdp = sfp->parentdp)))
 		return -ENXIO;
@@ -652,7 +655,8 @@ sg_write(struct file *filp, const char __user *buf, size_t count, loff_t * ppos)
 	else
 		hp->dxfer_direction = (mxsize > 0) ? SG_DXFER_FROM_DEV : SG_DXFER_NONE;
 	hp->dxfer_len = mxsize;
-	if (hp->dxfer_direction == SG_DXFER_TO_DEV)
+	if ((hp->dxfer_direction == SG_DXFER_TO_DEV) ||
+	    (hp->dxfer_direction == SG_DXFER_TO_FROM_DEV))
 		hp->dxferp = (char __user *)buf + cmd_size;
 	else
 		hp->dxferp = NULL;
@@ -787,8 +791,14 @@ sg_common_write(Sg_fd * sfp, Sg_request * srp,
 		return k;	/* probably out of space --> ENOMEM */
 	}
 	if (atomic_read(&sdp->detaching)) {
-		if (srp->bio)
+		if (srp->bio) {
+			if (srp->rq->cmd != srp->rq->__cmd)
+				kfree(srp->rq->cmd);
+
 			blk_end_request_all(srp->rq, -EIO);
+			srp->rq = NULL;
+		}
+
 		sg_finish_rem_req(srp);
 		return -ENODEV;
 	}
@@ -1298,7 +1308,7 @@ sg_mmap(struct file *filp, struct vm_area_struct *vma)
 	}
 
 	sfp->mmap_called = 1;
-	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
+	vma->vm_flags |= VM_IO | VM_DONTEXPAND | VM_DONTDUMP;
 	vma->vm_private_data = sfp;
 	vma->vm_ops = &sg_mmap_vm_ops;
 	return 0;
@@ -1377,6 +1387,17 @@ sg_rq_end_io(struct request *rq, int uptodate)
 		}
 	}
 	/* Rely on write phase to clean out srp status values, so no "else" */
+
+	/*
+	 * Free the request as soon as it is complete so that its resources
+	 * can be reused without waiting for userspace to read() the
+	 * result.  But keep the associated bio (if any) around until
+	 * blk_rq_unmap_user() can be called from user context.
+	 */
+	srp->rq = NULL;
+	if (rq->cmd != rq->__cmd)
+		kfree(rq->cmd);
+	__blk_put_request(rq->q, rq);
 
 	write_lock_irqsave(&sfp->rq_list_lock, iflags);
 	if (unlikely(srp->orphan)) {
@@ -1712,7 +1733,22 @@ sg_start_req(Sg_request *srp, unsigned char *cmd)
 			return -ENOMEM;
 	}
 
-	rq = blk_get_request(q, rw, GFP_ATOMIC);
+	/*
+	 * NOTE
+	 *
+	 * With scsi-mq enabled, there are a fixed number of preallocated
+	 * requests equal in number to shost->can_queue.  If all of the
+	 * preallocated requests are already in use, then using GFP_ATOMIC with
+	 * blk_get_request() will return -EWOULDBLOCK, whereas using GFP_KERNEL
+	 * will cause blk_get_request() to sleep until an active command
+	 * completes, freeing up a request.  Neither option is ideal, but
+	 * GFP_KERNEL is the better choice to prevent userspace from getting an
+	 * unexpected EWOULDBLOCK.
+	 *
+	 * With scsi-mq disabled, blk_get_request() with GFP_KERNEL usually
+	 * does not sleep except under memory pressure.
+	 */
+	rq = blk_get_request(q, rw, GFP_KERNEL);
 	if (IS_ERR(rq)) {
 		kfree(long_cmdp);
 		return PTR_ERR(rq);
@@ -1808,10 +1844,10 @@ sg_finish_rem_req(Sg_request *srp)
 	SCSI_LOG_TIMEOUT(4, sg_printk(KERN_INFO, sfp->parentdp,
 				      "sg_finish_rem_req: res_used=%d\n",
 				      (int) srp->res_used));
-	if (srp->rq) {
-		if (srp->bio)
-			ret = blk_rq_unmap_user(srp->bio);
+	if (srp->bio)
+		ret = blk_rq_unmap_user(srp->bio);
 
+	if (srp->rq) {
 		if (srp->rq->cmd != srp->rq->__cmd)
 			kfree(srp->rq->cmd);
 		blk_put_request(srp->rq);

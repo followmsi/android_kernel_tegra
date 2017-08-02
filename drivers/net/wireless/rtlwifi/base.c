@@ -1314,8 +1314,11 @@ u8 rtl_is_special_data(struct ieee80211_hw *hw, struct sk_buff *skb, u8 is_tx)
 		}
 
 		return true;
-	} else if (0x86DD == ether_type) {
-		return true;
+	} else if (ETH_P_IPV6 == ether_type) {
+		/* TODO: Handle any IPv6 cases that need special handling.
+		 * For now, always return false
+		 */
+		goto end;
 	}
 
 end:
@@ -1584,9 +1587,9 @@ void rtl_watchdog_wq_callback(void *data)
 		if (((rtlpriv->link_info.num_rx_inperiod +
 		      rtlpriv->link_info.num_tx_inperiod) > 8) ||
 		    (rtlpriv->link_info.num_rx_inperiod > 2))
-			rtl_lps_enter(hw);
-		else
 			rtl_lps_leave(hw);
+		else
+			rtl_lps_enter(hw);
 	}
 
 	rtlpriv->link_info.num_rx_inperiod = 0;

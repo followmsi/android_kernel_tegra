@@ -572,19 +572,19 @@ static void fast_mix(struct fast_pool *f)
 	__u32 c = f->pool[2],	d = f->pool[3];
 
 	a += b;			c += d;
-	b = rol32(a, 6);	d = rol32(c, 27);
+	b = rol32(b, 6);	d = rol32(d, 27);
 	d ^= a;			b ^= c;
 
 	a += b;			c += d;
-	b = rol32(a, 16);	d = rol32(c, 14);
+	b = rol32(b, 16);	d = rol32(d, 14);
 	d ^= a;			b ^= c;
 
 	a += b;			c += d;
-	b = rol32(a, 6);	d = rol32(c, 27);
+	b = rol32(b, 6);	d = rol32(d, 27);
 	d ^= a;			b ^= c;
 
 	a += b;			c += d;
-	b = rol32(a, 16);	d = rol32(c, 14);
+	b = rol32(b, 16);	d = rol32(d, 14);
 	d ^= a;			b ^= c;
 
 	f->pool[0] = a;  f->pool[1] = b;
@@ -1793,13 +1793,15 @@ int random_int_secret_init(void)
 	return 0;
 }
 
+static DEFINE_PER_CPU(__u32 [MD5_DIGEST_WORDS], get_random_int_hash)
+		__aligned(sizeof(unsigned long));
+
 /*
  * Get a random word for internal kernel use only. Similar to urandom but
  * with the goal of minimal entropy pool depletion. As a result, the random
  * value is not cryptographically secure but for several uses the cost of
  * depleting entropy is too high
  */
-static DEFINE_PER_CPU(__u32 [MD5_DIGEST_WORDS], get_random_int_hash);
 unsigned int get_random_int(void)
 {
 	__u32 *hash;

@@ -134,6 +134,7 @@
 	ldc1	$f28, THREAD_FPR28_LS64(\thread)
 	ldc1	$f30, THREAD_FPR30_LS64(\thread)
 	ctc1	\tmp, fcr31
+	.set	pop
 	.endm
 
 	.macro	fpu_restore_16odd thread
@@ -304,7 +305,7 @@
 	.set	push
 	.set	noat
 	SET_HARDFLOAT
-	add	$1, \base, \off
+	addu	$1, \base, \off
 	.word	LDD_MSA_INSN | (\wd << 6)
 	.set	pop
 	.endm
@@ -313,7 +314,7 @@
 	.set	push
 	.set	noat
 	SET_HARDFLOAT
-	add	$1, \base, \off
+	addu	$1, \base, \off
 	.word	STD_MSA_INSN | (\wd << 6)
 	.set	pop
 	.endm

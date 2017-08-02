@@ -56,6 +56,7 @@ struct btrfs_transaction {
 	wait_queue_head_t commit_wait;
 	struct list_head pending_snapshots;
 	struct list_head pending_chunks;
+	struct list_head pending_ordered;
 	struct list_head switch_commits;
 	struct btrfs_delayed_ref_root delayed_refs;
 	int aborted;
@@ -87,7 +88,6 @@ struct btrfs_trans_handle {
 	u64 qgroup_reserved;
 	unsigned long use_count;
 	unsigned long blocks_reserved;
-	unsigned long blocks_used;
 	unsigned long delayed_ref_updates;
 	struct btrfs_transaction *transaction;
 	struct btrfs_block_rsv *block_rsv;
@@ -97,6 +97,7 @@ struct btrfs_trans_handle {
 	bool allocating_chunk;
 	bool reloc_reserved;
 	bool sync;
+	bool dirty;
 	unsigned int type;
 	/*
 	 * this root is only needed to validate that the root passed to
@@ -105,6 +106,7 @@ struct btrfs_trans_handle {
 	 */
 	struct btrfs_root *root;
 	struct seq_list delayed_ref_elem;
+	struct list_head ordered;
 	struct list_head qgroup_ref_list;
 	struct list_head new_bgs;
 };

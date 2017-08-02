@@ -174,6 +174,7 @@ static irqreturn_t cxl_irq(int irq, void *data)
 		}
 
 		cxl_ack_irq(ctx, CXL_PSL_TFC_An_A, 0);
+		return IRQ_HANDLED;
 	}
 	if (dsisr & CXL_PSL_DSISR_An_OC)
 		pr_devel("CXL interrupt: OS Context Warning\n");
@@ -271,7 +272,6 @@ unsigned int cxl_map_irq(struct cxl *adapter, irq_hw_number_t hwirq,
 void cxl_unmap_irq(unsigned int virq, void *cookie)
 {
 	free_irq(virq, cookie);
-	irq_dispose_mapping(virq);
 }
 
 static int cxl_register_one_irq(struct cxl *adapter,

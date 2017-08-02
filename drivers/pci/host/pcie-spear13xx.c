@@ -280,7 +280,8 @@ static int add_pcie_port(struct pcie_port *pp, struct platform_device *pdev)
 		return -ENODEV;
 	}
 	ret = devm_request_irq(dev, pp->irq, spear13xx_pcie_irq_handler,
-			       IRQF_SHARED, "spear1340-pcie", pp);
+			       IRQF_SHARED | IRQF_NO_THREAD,
+			       "spear1340-pcie", pp);
 	if (ret) {
 		dev_err(dev, "failed to request irq %d\n", pp->irq);
 		return ret;
@@ -298,7 +299,7 @@ static int add_pcie_port(struct pcie_port *pp, struct platform_device *pdev)
 	return 0;
 }
 
-static int __init spear13xx_pcie_probe(struct platform_device *pdev)
+static int spear13xx_pcie_probe(struct platform_device *pdev)
 {
 	struct spear13xx_pcie *spear13xx_pcie;
 	struct pcie_port *pp;
@@ -371,7 +372,7 @@ static const struct of_device_id spear13xx_pcie_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, spear13xx_pcie_of_match);
 
-static struct platform_driver spear13xx_pcie_driver __initdata = {
+static struct platform_driver spear13xx_pcie_driver = {
 	.probe		= spear13xx_pcie_probe,
 	.driver = {
 		.name	= "spear-pcie",

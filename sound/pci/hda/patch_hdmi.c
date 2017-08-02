@@ -437,7 +437,8 @@ static int hdmi_eld_ctl_get(struct snd_kcontrol *kcontrol,
 	eld = &per_pin->sink_eld;
 
 	mutex_lock(&per_pin->lock);
-	if (eld->eld_size > ARRAY_SIZE(ucontrol->value.bytes.data)) {
+	if (eld->eld_size > ARRAY_SIZE(ucontrol->value.bytes.data) ||
+	    eld->eld_size > ELD_MAX_SIZE) {
 		mutex_unlock(&per_pin->lock);
 		snd_BUG();
 		return -EINVAL;
@@ -1555,6 +1556,8 @@ static bool hdmi_present_sense(struct hdmi_spec_per_pin *per_pin, int repoll)
 
 	mutex_lock(&per_pin->lock);
 	pin_eld->monitor_present = !!(present & AC_PINSENSE_PRESENCE);
+	eld->monitor_present = pin_eld->monitor_present;
+
 	if (pin_eld->monitor_present)
 		eld->eld_valid  = !!(present & AC_PINSENSE_ELDV);
 	else

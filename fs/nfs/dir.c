@@ -469,6 +469,8 @@ void nfs_prime_dcache(struct dentry *parent, struct nfs_entry *entry)
 	struct inode *inode;
 	int status;
 
+	if (!(entry->fattr->valid & NFS_ATTR_FATTR_FSID))
+		return;
 	if (filename.name[0] == '.') {
 		if (filename.len == 1)
 			return;
@@ -479,6 +481,10 @@ void nfs_prime_dcache(struct dentry *parent, struct nfs_entry *entry)
 
 	dentry = d_lookup(parent, &filename);
 	if (dentry != NULL) {
+		/* Is there a mountpoint here? If so, just exit */
+		if (!nfs_fsid_equal(&NFS_SB(dentry->d_sb)->fsid,
+					&entry->fattr->fsid))
+			goto out;
 		if (nfs_same_file(dentry, entry)) {
 			nfs_set_verifier(dentry, nfs_save_change_attribute(dir));
 			status = nfs_refresh_inode(dentry->d_inode, entry->fattr);
@@ -1135,11 +1141,13 @@ static int nfs_lookup_revalidate(struct dentry *dentry, unsigned int flags)
 	/* Force a full look up iff the parent directory has changed */
 	if (!nfs_is_exclusive_create(dir, flags) &&
 	    nfs_check_verifier(dir, dentry, flags & LOOKUP_RCU)) {
-
-		if (nfs_lookup_verify_inode(inode, flags)) {
+		error = nfs_lookup_verify_inode(inode, flags);
+		if (error) {
 			if (flags & LOOKUP_RCU)
 				return -ECHILD;
-			goto out_zap_parent;
+			if (error == -ESTALE)
+				goto out_zap_parent;
+			goto out_error;
 		}
 		goto out_valid;
 	}
@@ -1163,8 +1171,10 @@ static int nfs_lookup_revalidate(struct dentry *dentry, unsigned int flags)
 	trace_nfs_lookup_revalidate_enter(dir, dentry, flags);
 	error = NFS_PROTO(dir)->lookup(dir, &dentry->d_name, fhandle, fattr, label);
 	trace_nfs_lookup_revalidate_exit(dir, dentry, flags, error);
-	if (error)
+	if (error == -ESTALE || error == -ENOENT)
 		goto out_bad;
+	if (error)
+		goto out_error;
 	if (nfs_compare_fh(NFS_FH(inode), fhandle))
 		goto out_bad;
 	if ((error = nfs_refresh_inode(inode, fattr)) != 0)
@@ -1523,9 +1533,9 @@ int nfs_atomic_open(struct inode *dir, struct dentry *dentry,
 		err = PTR_ERR(inode);
 		trace_nfs_atomic_open_exit(dir, ctx, open_flags, err);
 		put_nfs_open_context(ctx);
+		d_drop(dentry);
 		switch (err) {
 		case -ENOENT:
-			d_drop(dentry);
 			d_add(dentry, NULL);
 			nfs_set_verifier(dentry, nfs_save_change_attribute(dir));
 			break;

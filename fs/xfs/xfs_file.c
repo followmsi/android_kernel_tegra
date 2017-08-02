@@ -127,7 +127,7 @@ xfs_iozero(
 		status = 0;
 	} while (count);
 
-	return (-status);
+	return status;
 }
 
 /*
@@ -363,7 +363,8 @@ STATIC int				/* error (positive) */
 xfs_zero_last_block(
 	struct xfs_inode	*ip,
 	xfs_fsize_t		offset,
-	xfs_fsize_t		isize)
+	xfs_fsize_t		isize,
+	bool			*did_zeroing)
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	xfs_fileoff_t		last_fsb = XFS_B_TO_FSBT(mp, isize);
@@ -391,6 +392,7 @@ xfs_zero_last_block(
 	zero_len = mp->m_sb.sb_blocksize - zero_offset;
 	if (isize + zero_len > offset)
 		zero_len = offset - isize;
+	*did_zeroing = true;
 	return xfs_iozero(ip, isize, zero_len);
 }
 
@@ -409,7 +411,8 @@ int					/* error (positive) */
 xfs_zero_eof(
 	struct xfs_inode	*ip,
 	xfs_off_t		offset,		/* starting I/O offset */
-	xfs_fsize_t		isize)		/* current inode size */
+	xfs_fsize_t		isize,		/* current inode size */
+	bool			*did_zeroing)
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	xfs_fileoff_t		start_zero_fsb;
@@ -431,7 +434,7 @@ xfs_zero_eof(
 	 * We only zero a part of that block so it is handled specially.
 	 */
 	if (XFS_B_FSB_OFFSET(mp, isize) != 0) {
-		error = xfs_zero_last_block(ip, offset, isize);
+		error = xfs_zero_last_block(ip, offset, isize, did_zeroing);
 		if (error)
 			return error;
 	}
@@ -491,6 +494,7 @@ xfs_zero_eof(
 		if (error)
 			return error;
 
+		*did_zeroing = true;
 		start_zero_fsb = imap.br_startoff + imap.br_blockcount;
 		ASSERT(start_zero_fsb <= (end_zero_fsb + 1));
 	}
@@ -529,13 +533,15 @@ restart:
 	 * having to redo all checks before.
 	 */
 	if (*pos > i_size_read(inode)) {
+		bool	zero = false;
+
 		if (*iolock == XFS_IOLOCK_SHARED) {
 			xfs_rw_iunlock(ip, *iolock);
 			*iolock = XFS_IOLOCK_EXCL;
 			xfs_rw_ilock(ip, *iolock);
 			goto restart;
 		}
-		error = xfs_zero_eof(ip, *pos, i_size_read(inode));
+		error = xfs_zero_eof(ip, *pos, i_size_read(inode), &zero);
 		if (error)
 			return error;
 	}
@@ -1077,7 +1083,7 @@ xfs_find_get_desired_pgoff(
 		unsigned	nr_pages;
 		unsigned int	i;
 
-		want = min_t(pgoff_t, end - index, PAGEVEC_SIZE);
+		want = min_t(pgoff_t, end - index, PAGEVEC_SIZE - 1) + 1;
 		nr_pages = pagevec_lookup(&pvec, inode->i_mapping, index,
 					  want);
 		/*
@@ -1104,17 +1110,6 @@ xfs_find_get_desired_pgoff(
 			break;
 		}
 
-		/*
-		 * At lease we found one page.  If this is the first time we
-		 * step into the loop, and if the first page index offset is
-		 * greater than the given search offset, a hole was found.
-		 */
-		if (type == HOLE_OFF && lastoff == startoff &&
-		    lastoff < page_offset(pvec.pages[0])) {
-			found = true;
-			break;
-		}
-
 		for (i = 0; i < nr_pages; i++) {
 			struct page	*page = pvec.pages[i];
 			loff_t		b_offset;
@@ -1126,18 +1121,18 @@ xfs_find_get_desired_pgoff(
 			 * file mapping. However, page->index will not change
 			 * because we have a reference on the page.
 			 *
-			 * Searching done if the page index is out of range.
-			 * If the current offset is not reaches the end of
-			 * the specified search range, there should be a hole
-			 * between them.
+			 * If current page offset is beyond where we've ended,
+			 * we've found a hole.
 			 */
-			if (page->index > end) {
-				if (type == HOLE_OFF && lastoff < endoff) {
-					*offset = lastoff;
-					found = true;
-				}
+			if (type == HOLE_OFF && lastoff < endoff &&
+			    lastoff < page_offset(pvec.pages[i])) {
+				found = true;
+				*offset = lastoff;
 				goto out;
 			}
+			/* Searching done if the page index is out of range. */
+			if (page->index > end)
+				goto out;
 
 			lock_page(page);
 			/*

@@ -28,7 +28,7 @@
 #define AT91_AIC_IRQ_MIN_PRIORITY	0
 #define AT91_AIC_IRQ_MAX_PRIORITY	7
 
-#define AT91_AIC_SRCTYPE		GENMASK(7, 6)
+#define AT91_AIC_SRCTYPE		GENMASK(6, 5)
 #define AT91_AIC_SRCTYPE_LOW		(0 << 5)
 #define AT91_AIC_SRCTYPE_FALLING	(1 << 5)
 #define AT91_AIC_SRCTYPE_HIGH		(2 << 5)
@@ -74,7 +74,7 @@ int aic_common_set_type(struct irq_data *d, unsigned type, unsigned *val)
 		return -EINVAL;
 	}
 
-	*val &= AT91_AIC_SRCTYPE;
+	*val &= ~AT91_AIC_SRCTYPE;
 	*val |= aic_type;
 
 	return 0;
@@ -86,7 +86,7 @@ int aic_common_set_priority(int priority, unsigned *val)
 	    priority > AT91_AIC_IRQ_MAX_PRIORITY)
 		return -EINVAL;
 
-	*val &= AT91_AIC_PRIOR;
+	*val &= ~AT91_AIC_PRIOR;
 	*val |= priority;
 
 	return 0;

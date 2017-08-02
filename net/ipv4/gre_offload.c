@@ -36,7 +36,8 @@ static struct sk_buff *gre_gso_segment(struct sk_buff *skb,
 				  SKB_GSO_TCP_ECN |
 				  SKB_GSO_GRE |
 				  SKB_GSO_GRE_CSUM |
-				  SKB_GSO_IPIP)))
+				  SKB_GSO_IPIP |
+				  SKB_GSO_SIT)))
 		goto out;
 
 	if (!skb->encapsulation)
@@ -126,6 +127,11 @@ static struct sk_buff **gre_gro_receive(struct sk_buff **head,
 	int flush = 1;
 	struct packet_offload *ptype;
 	__be16 type;
+
+	if (NAPI_GRO_CB(skb)->encap_mark)
+		goto out;
+
+	NAPI_GRO_CB(skb)->encap_mark = 1;
 
 	off = skb_gro_offset(skb);
 	hlen = off + sizeof(*greh);
@@ -247,6 +253,9 @@ static int gre_gro_complete(struct sk_buff *skb, int nhoff)
 		err = ptype->callbacks.gro_complete(skb, nhoff + grehlen);
 
 	rcu_read_unlock();
+
+	skb_set_inner_mac_header(skb, nhoff + grehlen);
+
 	return err;
 }
 

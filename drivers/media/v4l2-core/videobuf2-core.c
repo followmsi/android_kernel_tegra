@@ -1100,7 +1100,7 @@ EXPORT_SYMBOL_GPL(vb2_create_bufs);
  */
 void *vb2_plane_vaddr(struct vb2_buffer *vb, unsigned int plane_no)
 {
-	if (plane_no > vb->num_planes || !vb->planes[plane_no].mem_priv)
+	if (plane_no >= vb->num_planes || !vb->planes[plane_no].mem_priv)
 		return NULL;
 
 	return call_ptr_memop(vb, vaddr, vb->planes[plane_no].mem_priv);
@@ -2602,10 +2602,10 @@ unsigned int vb2_poll(struct vb2_queue *q, struct file *file, poll_table *wait)
 		return res | POLLERR;
 
 	/*
-	 * For output streams you can write as long as there are fewer buffers
-	 * queued than there are buffers available.
+	 * For output streams you can call write() as long as there are fewer
+	 * buffers queued than there are buffers available.
 	 */
-	if (V4L2_TYPE_IS_OUTPUT(q->type) && q->queued_count < q->num_buffers)
+	if (V4L2_TYPE_IS_OUTPUT(q->type) && q->fileio && q->queued_count < q->num_buffers)
 		return res | POLLOUT | POLLWRNORM;
 
 	if (list_empty(&q->done_list)) {
@@ -3134,27 +3134,26 @@ static int vb2_thread(void *data)
 			prequeue--;
 		} else {
 			call_void_qop(q, wait_finish, q);
-			ret = vb2_internal_dqbuf(q, &fileio->b, 0);
+			if (!threadio->stop)
+				ret = vb2_internal_dqbuf(q, &fileio->b, 0);
 			call_void_qop(q, wait_prepare, q);
 			dprintk(5, "file io: vb2_dqbuf result: %d\n", ret);
 		}
-		if (threadio->stop)
-			break;
-		if (ret)
+		if (ret || threadio->stop)
 			break;
 		try_to_freeze();
 
 		vb = q->bufs[fileio->b.index];
 		if (!(fileio->b.flags & V4L2_BUF_FLAG_ERROR))
-			ret = threadio->fnc(vb, threadio->priv);
-		if (ret)
-			break;
+			if (threadio->fnc(vb, threadio->priv))
+				break;
 		call_void_qop(q, wait_finish, q);
 		if (set_timestamp)
 			v4l2_get_timestamp(&fileio->b.timestamp);
-		ret = vb2_internal_qbuf(q, &fileio->b);
+		if (!threadio->stop)
+			ret = vb2_internal_qbuf(q, &fileio->b);
 		call_void_qop(q, wait_prepare, q);
-		if (ret)
+		if (ret || threadio->stop)
 			break;
 	}
 
@@ -3223,11 +3222,11 @@ int vb2_thread_stop(struct vb2_queue *q)
 	threadio->stop = true;
 	vb2_internal_streamoff(q, q->type);
 	call_void_qop(q, wait_prepare, q);
+	err = kthread_stop(threadio->thread);
 	q->fileio = NULL;
 	fileio->req.count = 0;
 	vb2_reqbufs(q, &fileio->req);
 	kfree(fileio);
-	err = kthread_stop(threadio->thread);
 	threadio->thread = NULL;
 	kfree(threadio);
 	q->fileio = NULL;

@@ -84,7 +84,7 @@ static unsigned int iio_event_poll(struct file *filep,
 	unsigned int events = 0;
 
 	if (!indio_dev->info)
-		return -ENODEV;
+		return events;
 
 	poll_wait(filep, &ev_int->wait, wait);
 
@@ -501,6 +501,7 @@ error_free_setup_event_lines:
 	iio_free_chan_devattr_list(&indio_dev->event_interface->dev_attr_list);
 	mutex_destroy(&indio_dev->event_interface->read_lock);
 	kfree(indio_dev->event_interface);
+	indio_dev->event_interface = NULL;
 	return ret;
 }
 

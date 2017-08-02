@@ -172,10 +172,7 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 	time_end = ktime_get();
 	trace_cpu_idle_rcuidle(PWR_EVENT_EXIT, dev->cpu);
 
-	/* The cpu is no longer idle or about to enter idle. */
-	sched_idle_set_state(NULL);
-
-	if (!cpuidle_state_is_coupled(dev, drv, entered_state))
+	if (!cpuidle_state_is_coupled(dev, drv, index))
 		local_irq_enable();
 
 	diff = ktime_to_us(ktime_sub(time_end, time_start));
@@ -335,9 +332,6 @@ int cpuidle_enable_device(struct cpuidle_device *dev)
 
 	if (!dev->registered)
 		return -EINVAL;
-
-	if (!dev->state_count)
-		dev->state_count = drv->state_count;
 
 	ret = cpuidle_add_device_sysfs(dev);
 	if (ret)

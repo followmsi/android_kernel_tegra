@@ -449,6 +449,7 @@ ep_write (struct file *fd, const char __user *buf, size_t len, loff_t *ptr)
 		data->name, len, (int) value);
 free1:
 	mutex_unlock(&data->lock);
+	kfree (kbuf);
 	return value;
 }
 
@@ -564,7 +565,6 @@ static ssize_t ep_copy_to_user(struct kiocb_priv *priv)
 		if (total == 0)
 			break;
 	}
-
 	return len;
 }
 
@@ -583,6 +583,7 @@ static void ep_user_copy_worker(struct work_struct *work)
 	aio_complete(iocb, ret, ret);
 
 	kfree(priv->buf);
+	kfree(priv->iv);
 	kfree(priv);
 }
 
@@ -603,6 +604,7 @@ static void ep_aio_complete(struct usb_ep *ep, struct usb_request *req)
 	 */
 	if (priv->iv == NULL || unlikely(req->actual == 0)) {
 		kfree(req->buf);
+		kfree(priv->iv);
 		kfree(priv);
 		iocb->private = NULL;
 		/* aio_complete() reports bytes-transferred _and_ faults */
@@ -638,7 +640,7 @@ ep_aio_rwtail(
 	struct usb_request	*req;
 	ssize_t			value;
 
-	priv = kmalloc(sizeof *priv, GFP_KERNEL);
+	priv = kzalloc(sizeof *priv, GFP_KERNEL);
 	if (!priv) {
 		value = -ENOMEM;
 fail:
@@ -647,7 +649,15 @@ fail:
 	}
 	iocb->private = priv;
 	priv->iocb = iocb;
-	priv->iv = iv;
+	if (iv) {
+		priv->iv = kmemdup(iv, nr_segs * sizeof(struct iovec),
+				   GFP_KERNEL);
+		if (!priv->iv) {
+			kfree(priv);
+			value = -ENOMEM;
+			goto fail;
+		}
+	}
 	priv->nr_segs = nr_segs;
 	INIT_WORK(&priv->work, ep_user_copy_worker);
 
@@ -687,6 +697,7 @@ fail:
 	mutex_unlock(&epdata->lock);
 
 	if (unlikely(value)) {
+		kfree(priv->iv);
 		kfree(priv);
 		put_ep(epdata);
 	} else
@@ -1008,8 +1019,11 @@ ep0_read (struct file *fd, char __user *buf, size_t len, loff_t *ptr)
 			struct usb_ep		*ep = dev->gadget->ep0;
 			struct usb_request	*req = dev->req;
 
-			if ((retval = setup_req (ep, req, 0)) == 0)
-				retval = usb_ep_queue (ep, req, GFP_ATOMIC);
+			if ((retval = setup_req (ep, req, 0)) == 0) {
+				spin_unlock_irq (&dev->lock);
+				retval = usb_ep_queue (ep, req, GFP_KERNEL);
+				spin_lock_irq (&dev->lock);
+			}
 			dev->state = STATE_DEV_CONNECTED;
 
 			/* assume that was SET_CONFIGURATION */
@@ -1540,8 +1554,11 @@ delegate:
 							w_length);
 				if (value < 0)
 					break;
+
+				spin_unlock (&dev->lock);
 				value = usb_ep_queue (gadget->ep0, dev->req,
-							GFP_ATOMIC);
+							GFP_KERNEL);
+				spin_lock (&dev->lock);
 				if (value < 0) {
 					clean_req (gadget->ep0, dev->req);
 					break;
@@ -1564,11 +1581,14 @@ delegate:
 	if (value >= 0 && dev->state != STATE_DEV_SETUP) {
 		req->length = value;
 		req->zero = value < w_length;
-		value = usb_ep_queue (gadget->ep0, req, GFP_ATOMIC);
+
+		spin_unlock (&dev->lock);
+		value = usb_ep_queue (gadget->ep0, req, GFP_KERNEL);
 		if (value < 0) {
 			DBG (dev, "ep_queue --> %d\n", value);
 			req->status = 0;
 		}
+		return value;
 	}
 
 	/* device stalls when value < 0 */

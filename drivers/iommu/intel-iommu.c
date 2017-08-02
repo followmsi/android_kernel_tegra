@@ -50,6 +50,7 @@
 #define CONTEXT_SIZE		VTD_PAGE_SIZE
 
 #define IS_GFX_DEVICE(pdev) ((pdev->class >> 16) == PCI_BASE_CLASS_DISPLAY)
+#define IS_USB_DEVICE(pdev) ((pdev->class >> 8) == PCI_CLASS_SERIAL_USB)
 #define IS_ISA_DEVICE(pdev) ((pdev->class >> 8) == PCI_CLASS_BRIDGE_ISA)
 #define IS_AZALIA(pdev) ((pdev)->vendor == 0x8086 && (pdev)->device == 0x3a3e)
 
@@ -687,7 +688,13 @@ static struct intel_iommu *device_to_iommu(struct device *dev, u8 *bus, u8 *devf
 	int i;
 
 	if (dev_is_pci(dev)) {
+		struct pci_dev *pf_pdev;
+
 		pdev = to_pci_dev(dev);
+		/* VFs aren't listed in scope tables; we need to look up
+		 * the PF instead to find the IOMMU. */
+		pf_pdev = pci_physfn(pdev);
+		dev = &pf_pdev->dev;
 		segment = pci_domain_nr(pdev->bus);
 	} else if (ACPI_COMPANION(dev))
 		dev = &ACPI_COMPANION(dev)->dev;
@@ -965,7 +972,7 @@ static void dma_pte_free_level(struct dmar_domain *domain, int level,
 		if (!dma_pte_present(pte) || dma_pte_superpage(pte))
 			goto next;
 
-		level_pfn = pfn & level_mask(level - 1);
+		level_pfn = pfn & level_mask(level);
 		level_pte = phys_to_virt(dma_pte_addr(pte));
 
 		if (level > 2)
@@ -1746,9 +1753,8 @@ static int domain_init(struct dmar_domain *domain, int guest_width)
 
 static void domain_exit(struct dmar_domain *domain)
 {
-	struct dmar_drhd_unit *drhd;
-	struct intel_iommu *iommu;
 	struct page *freelist = NULL;
+	int i;
 
 	/* Domain 0 is reserved, so dont process it */
 	if (!domain)
@@ -1768,8 +1774,8 @@ static void domain_exit(struct dmar_domain *domain)
 
 	/* clear attached or cached domains */
 	rcu_read_lock();
-	for_each_active_iommu(iommu, drhd)
-		iommu_detach_domain(domain, iommu);
+	for_each_set_bit(i, domain->iommu_bmp, g_num_of_iommus)
+		iommu_detach_domain(domain, g_iommus[i]);
 	rcu_read_unlock();
 
 	dma_free_pagelist(freelist);
@@ -1984,7 +1990,7 @@ static int __domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
 {
 	struct dma_pte *first_pte = NULL, *pte = NULL;
 	phys_addr_t uninitialized_var(pteval);
-	unsigned long sg_res;
+	unsigned long sg_res = 0;
 	unsigned int largepage_lvl = 0;
 	unsigned long lvl_pages = 0;
 
@@ -1995,10 +2001,8 @@ static int __domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
 
 	prot &= DMA_PTE_READ | DMA_PTE_WRITE | DMA_PTE_SNP;
 
-	if (sg)
-		sg_res = 0;
-	else {
-		sg_res = nr_pages + 1;
+	if (!sg) {
+		sg_res = nr_pages;
 		pteval = ((phys_addr_t)phys_pfn << VTD_PAGE_SHIFT) | prot;
 	}
 
@@ -2561,6 +2565,10 @@ static bool device_has_rmrr(struct device *dev)
  * In both cases we assume that PCI USB devices with RMRRs have them largely
  * for historical reasons and that the RMRR space is not actively used post
  * boot.  This exclusion may change if vendors begin to abuse it.
+ *
+ * The same exception is made for graphics devices, with the requirement that
+ * any use of the RMRR regions will be torn down before assigning the device
+ * to a guest.
  */
 static bool device_is_rmrr_locked(struct device *dev)
 {
@@ -2570,7 +2578,7 @@ static bool device_is_rmrr_locked(struct device *dev)
 	if (dev_is_pci(dev)) {
 		struct pci_dev *pdev = to_pci_dev(dev);
 
-		if ((pdev->class >> 8) == PCI_CLASS_SERIAL_USB)
+		if (IS_USB_DEVICE(pdev) || IS_GFX_DEVICE(pdev))
 			return false;
 	}
 
@@ -4253,6 +4261,10 @@ static int intel_iommu_attach_device(struct iommu_domain *domain,
 				domain_remove_one_dev_info(old_domain, dev);
 			else
 				domain_remove_dev_info(old_domain);
+
+			if (!domain_type_is_vm_or_si(old_domain) &&
+			     list_empty(&old_domain->devices))
+				domain_exit(old_domain);
 		}
 	}
 

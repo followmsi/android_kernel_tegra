@@ -732,6 +732,18 @@ bool ci_dpm_vblank_too_short(struct radeon_device *rdev)
 	u32 vblank_time = r600_dpm_get_vblank_time(rdev);
 	u32 switch_limit = pi->mem_gddr5 ? 450 : 300;
 
+	/* disable mclk switching if the refresh is >120Hz, even if the
+        * blanking period would allow it
+        */
+	if (r600_dpm_get_vrefresh(rdev) > 120)
+		return true;
+
+	/* disable mclk switching if the refresh is >120Hz, even if the
+        * blanking period would allow it
+        */
+	if (r600_dpm_get_vrefresh(rdev) > 120)
+		return true;
+
 	if (vblank_time < switch_limit)
 		return true;
 	else
@@ -4729,7 +4741,7 @@ void ci_dpm_disable(struct radeon_device *rdev)
 	ci_enable_spread_spectrum(rdev, false);
 	ci_enable_auto_throttle_source(rdev, RADEON_DPM_AUTO_THROTTLE_SRC_THERMAL, false);
 	ci_stop_dpm(rdev);
-	ci_enable_ds_master_switch(rdev, true);
+	ci_enable_ds_master_switch(rdev, false);
 	ci_enable_ulv(rdev, false);
 	ci_clear_vc(rdev);
 	ci_reset_to_default(rdev);

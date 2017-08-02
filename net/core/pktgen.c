@@ -211,8 +211,8 @@
 #define T_REMDEV      (1<<3)	/* Remove one dev */
 
 /* If lock -- protects updating of if_list */
-#define   if_lock(t)           spin_lock(&(t->if_lock));
-#define   if_unlock(t)           spin_unlock(&(t->if_lock));
+#define   if_lock(t)           mutex_lock(&(t->if_lock));
+#define   if_unlock(t)           mutex_unlock(&(t->if_lock));
 
 /* Used to help with determining the pkts on receive */
 #define PKTGEN_MAGIC 0xbe9be955
@@ -418,7 +418,7 @@ struct pktgen_net {
 };
 
 struct pktgen_thread {
-	spinlock_t if_lock;		/* for list of devices */
+	struct mutex if_lock;		/* for list of devices */
 	struct list_head if_list;	/* All device here */
 	struct list_head th_list;
 	struct task_struct *tsk;
@@ -1134,6 +1134,9 @@ static ssize_t pktgen_if_write(struct file *file,
 			return len;
 
 		i += len;
+		if ((value > 1) &&
+		    (!(pkt_dev->odev->priv_flags & IFF_TX_SKB_SHARING)))
+			return -ENOTSUPP;
 		pkt_dev->burst = value < 1 ? 1 : value;
 		sprintf(pg_result, "OK: burst=%d", pkt_dev->burst);
 		return count;
@@ -1949,11 +1952,13 @@ static void pktgen_change_name(const struct pktgen_net *pn, struct net_device *d
 {
 	struct pktgen_thread *t;
 
+	mutex_lock(&pktgen_thread_lock);
+
 	list_for_each_entry(t, &pn->pktgen_threads, th_list) {
 		struct pktgen_dev *pkt_dev;
 
-		rcu_read_lock();
-		list_for_each_entry_rcu(pkt_dev, &t->if_list, list) {
+		if_lock(t);
+		list_for_each_entry(pkt_dev, &t->if_list, list) {
 			if (pkt_dev->odev != dev)
 				continue;
 
@@ -1968,8 +1973,9 @@ static void pktgen_change_name(const struct pktgen_net *pn, struct net_device *d
 				       dev->name);
 			break;
 		}
-		rcu_read_unlock();
+		if_unlock(t);
 	}
+	mutex_unlock(&pktgen_thread_lock);
 }
 
 static int pktgen_device_event(struct notifier_block *unused,
@@ -2842,24 +2848,24 @@ static struct sk_buff *fill_packet_ipv4(struct net_device *odev,
 	skb->dev = odev;
 	skb->pkt_type = PACKET_HOST;
 
+	pktgen_finalize_skb(pkt_dev, skb, datalen);
+
 	if (!(pkt_dev->flags & F_UDPCSUM)) {
 		skb->ip_summed = CHECKSUM_NONE;
 	} else if (odev->features & NETIF_F_V4_CSUM) {
 		skb->ip_summed = CHECKSUM_PARTIAL;
 		skb->csum = 0;
-		udp4_hwcsum(skb, udph->source, udph->dest);
+		udp4_hwcsum(skb, iph->saddr, iph->daddr);
 	} else {
-		__wsum csum = udp_csum(skb);
+		__wsum csum = skb_checksum(skb, skb_transport_offset(skb), datalen + 8, 0);
 
 		/* add protocol-dependent pseudo-header */
-		udph->check = csum_tcpudp_magic(udph->source, udph->dest,
+		udph->check = csum_tcpudp_magic(iph->saddr, iph->daddr,
 						datalen + 8, IPPROTO_UDP, csum);
 
 		if (udph->check == 0)
 			udph->check = CSUM_MANGLED_0;
 	}
-
-	pktgen_finalize_skb(pkt_dev, skb, datalen);
 
 #ifdef CONFIG_XFRM
 	if (!process_ipsec(pkt_dev, skb, protocol))
@@ -2976,6 +2982,8 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
 	skb->dev = odev;
 	skb->pkt_type = PACKET_HOST;
 
+	pktgen_finalize_skb(pkt_dev, skb, datalen);
+
 	if (!(pkt_dev->flags & F_UDPCSUM)) {
 		skb->ip_summed = CHECKSUM_NONE;
 	} else if (odev->features & NETIF_F_V6_CSUM) {
@@ -2984,7 +2992,7 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
 		skb->csum_offset = offsetof(struct udphdr, check);
 		udph->check = ~csum_ipv6_magic(&iph->saddr, &iph->daddr, udplen, IPPROTO_UDP, 0);
 	} else {
-		__wsum csum = udp_csum(skb);
+		__wsum csum = skb_checksum(skb, skb_transport_offset(skb), udplen, 0);
 
 		/* add protocol-dependent pseudo-header */
 		udph->check = csum_ipv6_magic(&iph->saddr, &iph->daddr, udplen, IPPROTO_UDP, csum);
@@ -2992,8 +3000,6 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
 		if (udph->check == 0)
 			udph->check = CSUM_MANGLED_0;
 	}
-
-	pktgen_finalize_skb(pkt_dev, skb, datalen);
 
 	return skb;
 }
@@ -3641,7 +3647,7 @@ static int __net_init pktgen_create_thread(int cpu, struct pktgen_net *pn)
 		return -ENOMEM;
 	}
 
-	spin_lock_init(&t->if_lock);
+	mutex_init(&t->if_lock);
 	t->cpu = cpu;
 
 	INIT_LIST_HEAD(&t->if_list);

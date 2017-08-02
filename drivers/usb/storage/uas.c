@@ -2,7 +2,7 @@
  * USB Attached SCSI
  * Note that this is not the same as the USB Mass Storage driver
  *
- * Copyright Hans de Goede <hdegoede@redhat.com> for Red Hat, Inc. 2013 - 2014
+ * Copyright Hans de Goede <hdegoede@redhat.com> for Red Hat, Inc. 2013 - 2016
  * Copyright Matthew Wilcox for Intel Corp, 2010
  * Copyright Sarah Sharp for Intel Corp, 2010
  *
@@ -768,9 +768,23 @@ static int uas_eh_bus_reset_handler(struct scsi_cmnd *cmnd)
 	return SUCCESS;
 }
 
+static int uas_target_alloc(struct scsi_target *starget)
+{
+	struct uas_dev_info *devinfo = (struct uas_dev_info *)
+			dev_to_shost(starget->dev.parent)->hostdata;
+
+	if (devinfo->flags & US_FL_NO_REPORT_LUNS)
+		starget->no_report_luns = 1;
+
+	return 0;
+}
+
 static int uas_slave_alloc(struct scsi_device *sdev)
 {
-	sdev->hostdata = (void *)sdev->host->hostdata;
+	struct uas_dev_info *devinfo =
+		(struct uas_dev_info *)sdev->host->hostdata;
+
+	sdev->hostdata = devinfo;
 
 	/* USB has unusual DMA-alignment requirements: Although the
 	 * starting address of each scatter-gather element doesn't matter,
@@ -788,6 +802,11 @@ static int uas_slave_alloc(struct scsi_device *sdev)
 	 * will require changes to the block layer.
 	 */
 	blk_queue_update_dma_alignment(sdev->request_queue, (512 - 1));
+
+	if (devinfo->flags & US_FL_MAX_SECTORS_64)
+		blk_queue_max_hw_sectors(sdev->request_queue, 64);
+	else if (devinfo->flags & US_FL_MAX_SECTORS_240)
+		blk_queue_max_hw_sectors(sdev->request_queue, 240);
 
 	return 0;
 }
@@ -808,11 +827,12 @@ static struct scsi_host_template uas_host_template = {
 	.module = THIS_MODULE,
 	.name = "uas",
 	.queuecommand = uas_queuecommand,
+	.target_alloc = uas_target_alloc,
 	.slave_alloc = uas_slave_alloc,
 	.slave_configure = uas_slave_configure,
 	.eh_abort_handler = uas_eh_abort_handler,
 	.eh_bus_reset_handler = uas_eh_bus_reset_handler,
-	.can_queue = 65536,	/* Is there a limit on the _host_ ? */
+	.can_queue = MAX_CMNDS,
 	.this_id = -1,
 	.sg_tablesize = SG_NONE,
 	.cmd_per_lun = 1,	/* until we override it */
@@ -906,8 +926,9 @@ static int uas_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	struct Scsi_Host *shost = NULL;
 	struct uas_dev_info *devinfo;
 	struct usb_device *udev = interface_to_usbdev(intf);
+	unsigned long dev_flags;
 
-	if (!uas_use_uas_driver(intf, id))
+	if (!uas_use_uas_driver(intf, id, &dev_flags))
 		return -ENODEV;
 
 	if (uas_switch_interface(udev, intf))
@@ -929,8 +950,7 @@ static int uas_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	devinfo->udev = udev;
 	devinfo->resetting = 0;
 	devinfo->shutdown = 0;
-	devinfo->flags = id->driver_info;
-	usb_stor_adjust_quirks(udev, &devinfo->flags);
+	devinfo->flags = dev_flags;
 	init_usb_anchor(&devinfo->cmd_urbs);
 	init_usb_anchor(&devinfo->sense_urbs);
 	init_usb_anchor(&devinfo->data_urbs);

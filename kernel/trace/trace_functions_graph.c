@@ -883,6 +883,10 @@ print_graph_entry_leaf(struct trace_iterator *iter,
 
 		cpu_data = per_cpu_ptr(data->cpu_data, cpu);
 
+		/* If a graph tracer ignored set_graph_notrace */
+		if (call->depth < -1)
+			call->depth += FTRACE_NOTRACE_DEPTH;
+
 		/*
 		 * Comments display at + 1 to depth. Since
 		 * this is a leaf function, keep the comments
@@ -891,7 +895,8 @@ print_graph_entry_leaf(struct trace_iterator *iter,
 		cpu_data->depth = call->depth - 1;
 
 		/* No need to keep this function around for this depth */
-		if (call->depth < FTRACE_RETFUNC_DEPTH)
+		if (call->depth < FTRACE_RETFUNC_DEPTH &&
+		    !WARN_ON_ONCE(call->depth < 0))
 			cpu_data->enter_funcs[call->depth] = 0;
 	}
 
@@ -928,11 +933,16 @@ print_graph_entry_nested(struct trace_iterator *iter,
 		struct fgraph_cpu_data *cpu_data;
 		int cpu = iter->cpu;
 
+		/* If a graph tracer ignored set_graph_notrace */
+		if (call->depth < -1)
+			call->depth += FTRACE_NOTRACE_DEPTH;
+
 		cpu_data = per_cpu_ptr(data->cpu_data, cpu);
 		cpu_data->depth = call->depth;
 
 		/* Save this function pointer to see if the exit matches */
-		if (call->depth < FTRACE_RETFUNC_DEPTH)
+		if (call->depth < FTRACE_RETFUNC_DEPTH &&
+		    !WARN_ON_ONCE(call->depth < 0))
 			cpu_data->enter_funcs[call->depth] = call->func;
 	}
 
@@ -1185,7 +1195,8 @@ print_graph_return(struct ftrace_graph_ret *trace, struct trace_seq *s,
 		 */
 		cpu_data->depth = trace->depth - 1;
 
-		if (trace->depth < FTRACE_RETFUNC_DEPTH) {
+		if (trace->depth < FTRACE_RETFUNC_DEPTH &&
+		    !WARN_ON_ONCE(trace->depth < 0)) {
 			if (cpu_data->enter_funcs[trace->depth] != trace->func)
 				func_match = 0;
 			cpu_data->enter_funcs[trace->depth] = 0;
@@ -1469,15 +1480,19 @@ void graph_trace_open(struct trace_iterator *iter)
 {
 	/* pid and depth on the last trace processed */
 	struct fgraph_data *data;
+	gfp_t gfpflags;
 	int cpu;
 
 	iter->private = NULL;
 
-	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	/* We can be called in atomic context via ftrace_dump() */
+	gfpflags = (in_atomic() || irqs_disabled()) ? GFP_ATOMIC : GFP_KERNEL;
+
+	data = kzalloc(sizeof(*data), gfpflags);
 	if (!data)
 		goto out_err;
 
-	data->cpu_data = alloc_percpu(struct fgraph_cpu_data);
+	data->cpu_data = alloc_percpu_gfp(struct fgraph_cpu_data, gfpflags);
 	if (!data->cpu_data)
 		goto out_err_free;
 

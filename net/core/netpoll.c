@@ -79,8 +79,7 @@ static int netpoll_start_xmit(struct sk_buff *skb, struct net_device *dev,
 
 	if (vlan_tx_tag_present(skb) &&
 	    !vlan_hw_offload_capable(features, skb->vlan_proto)) {
-		skb = __vlan_put_tag(skb, skb->vlan_proto,
-				     vlan_tx_tag_get(skb));
+		skb = __vlan_hwaccel_push_inside(skb);
 		if (unlikely(!skb)) {
 			/* This is actually a packet drop, but we
 			 * don't want the code that calls this
@@ -88,7 +87,6 @@ static int netpoll_start_xmit(struct sk_buff *skb, struct net_device *dev,
 			 */
 			goto out;
 		}
-		skb->vlan_tci = 0;
 	}
 
 	status = netdev_start_xmit(skb, dev, txq, false);
@@ -107,15 +105,21 @@ static void queue_process(struct work_struct *work)
 	while ((skb = skb_dequeue(&npinfo->txq))) {
 		struct net_device *dev = skb->dev;
 		struct netdev_queue *txq;
+		unsigned int q_index;
 
 		if (!netif_device_present(dev) || !netif_running(dev)) {
 			kfree_skb(skb);
 			continue;
 		}
 
-		txq = skb_get_tx_queue(dev, skb);
-
 		local_irq_save(flags);
+		/* check if skb->queue_mapping is still valid */
+		q_index = skb_get_queue_mapping(skb);
+		if (unlikely(q_index >= dev->real_num_tx_queues)) {
+			q_index = q_index % dev->real_num_tx_queues;
+			skb_set_queue_mapping(skb, q_index);
+		}
+		txq = netdev_get_tx_queue(dev, q_index);
 		HARD_TX_LOCK(dev, txq, smp_processor_id());
 		if (netif_xmit_frozen_or_stopped(txq) ||
 		    netpoll_start_xmit(skb, dev, txq) != NETDEV_TX_OK) {

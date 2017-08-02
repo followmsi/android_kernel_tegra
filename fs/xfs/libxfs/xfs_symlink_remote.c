@@ -166,6 +166,7 @@ xfs_symlink_write_verify(
 }
 
 const struct xfs_buf_ops xfs_symlink_buf_ops = {
+	.name = "xfs_symlink",
 	.verify_read = xfs_symlink_read_verify,
 	.verify_write = xfs_symlink_write_verify,
 };
@@ -179,6 +180,8 @@ xfs_symlink_local_to_remote(
 {
 	struct xfs_mount	*mp = ip->i_mount;
 	char			*buf;
+
+	xfs_trans_buf_set_type(tp, bp, XFS_BLFT_SYMLINK_BUF);
 
 	if (!xfs_sb_version_hascrc(&mp->m_sb)) {
 		bp->b_ops = NULL;

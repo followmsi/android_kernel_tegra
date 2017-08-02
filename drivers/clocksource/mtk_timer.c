@@ -230,6 +230,8 @@ static void __init mtk_timer_init(struct device_node *node)
 	}
 	rate = clk_get_rate(clk);
 
+	mtk_timer_global_reset(evt);
+
 	if (request_irq(evt->dev.irq, mtk_timer_interrupt,
 			IRQF_TIMER | IRQF_IRQPOLL, "mtk_timer", evt)) {
 		pr_warn("failed to setup irq %d\n", evt->dev.irq);
