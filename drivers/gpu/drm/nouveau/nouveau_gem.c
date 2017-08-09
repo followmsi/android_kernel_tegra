@@ -25,6 +25,7 @@
  */
 
 #include <linux/dma-buf.h>
+#include <linux/fdtable.h>
 #include <linux/freezer.h>
 #include <linux/kthread.h>
 #include <linux/wait.h>
@@ -1421,8 +1422,10 @@ nouveau_gem_ioctl_pushbuf_2(struct drm_device *dev, void *data,
 	return ret;
 
 out_recovery:
-	if (f)
+	if (f) {
 		fence_signal(&fence->base);
+		__close_fd(current->files, req->fence);
+	}
 out_fence:
 	nouveau_fence_unref(&fence);
 out_input_fence:
