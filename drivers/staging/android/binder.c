@@ -2488,10 +2488,12 @@ static int binder_thread_write(struct binder_proc *proc,
 			}
 			if (buffer->async_transaction && buffer->target_node) {
 				BUG_ON(!buffer->target_node->has_async_transaction);
-				if (list_empty(&buffer->target_node->async_todo))
+				if (list_empty(&buffer->target_node->async_todo)) {
 					buffer->target_node->has_async_transaction = 0;
-				else
-					list_move_tail(buffer->target_node->async_todo.next, &thread->todo);
+				} else {
+					list_move_tail(buffer->target_node->async_todo.next, &proc->todo);
+					wake_up_interruptible(&proc->wait);
+				}
 			}
 			trace_binder_transaction_buffer_release(buffer);
 			binder_transaction_buffer_release(proc, buffer, NULL);
