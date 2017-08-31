@@ -52,6 +52,7 @@
 #define BQ27x00_REG_IMAX		0x1E
 #define BQ27x00_REG_TTECP		0x26
 #define BQ27x00_REG_NAC			0x0C /* Nominal available capacity */
+#define BQ27x00_REG_RC			0x10 /* Remaining capacity */
 #define BQ27x00_REG_LMD			0x12 /* Last measured discharge */
 #define BQ27x00_REG_CYCT		0x2A /* Cycle count total */
 #define BQ27x00_REG_AE			0x22 /* Available energy */
@@ -181,6 +182,7 @@ static enum power_supply_property bq27742_battery_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_FULL,
 	POWER_SUPPLY_PROP_CHARGE_NOW,
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
+	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
 	POWER_SUPPLY_PROP_POWER_AVG,
 	POWER_SUPPLY_PROP_HEALTH,
@@ -282,6 +284,25 @@ static inline int bq27x00_battery_read_nac(struct bq27x00_device_info *di)
 		return -ENODATA;
 
 	return bq27x00_battery_read_charge(di, BQ27x00_REG_NAC);
+}
+
+/*
+ * Return the battery remaining capaciy in µAh
+ * Or < 0 if something fails.
+ */
+static inline int bq27x00_battery_read_rc(struct bq27x00_device_info *di)
+{
+	int flags;
+	bool is_bq27500 = di->chip == BQ27500;
+	bool is_bq27742 = di->chip == BQ27742;
+	bool is_higher = bq27xxx_is_chip_version_higher(di);
+	bool flags_1b = !(is_bq27500 || is_bq27742);
+
+	flags = bq27x00_read(di, BQ27x00_REG_FLAGS, flags_1b);
+	if (flags >= 0 && !is_higher && (flags & BQ27000_FLAG_CI))
+		return -ENODATA;
+
+	return bq27x00_battery_read_charge(di, BQ27x00_REG_RC);
 }
 
 /*
@@ -776,6 +797,9 @@ static int bq27x00_battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
 		ret = bq27x00_simple_value(di->charge_design_full, val);
+		break;
+	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
+		ret = bq27x00_simple_value(bq27x00_battery_read_rc(di), val);
 		break;
 	case POWER_SUPPLY_PROP_CYCLE_COUNT:
 		ret = bq27x00_simple_value(di->cache.cycle_count, val);

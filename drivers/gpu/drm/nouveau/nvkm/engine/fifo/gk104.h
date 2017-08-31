@@ -36,7 +36,6 @@ struct gk104_fifo_engn {
 struct gk104_fifo_priv {
 	struct nvkm_fifo base;
 
-	struct work_struct fault;
 	u64 mask;
 
 	struct gk104_fifo_engn *engine;

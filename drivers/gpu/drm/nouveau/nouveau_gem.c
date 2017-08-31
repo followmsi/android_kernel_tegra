@@ -25,6 +25,7 @@
  */
 
 #include <linux/dma-buf.h>
+#include <linux/fdtable.h>
 #include <linux/freezer.h>
 #include <linux/kthread.h>
 #include <linux/wait.h>
@@ -1150,6 +1151,7 @@ nouveau_gem_do_pushbuf(struct nouveau_pushbuf_data *pb_data)
 {
 	struct nouveau_cli *cli = nouveau_cli(pb_data->file_priv);
 	struct nouveau_channel *chan = pb_data->chan;
+	struct nvkm_fifo_chan *fifo = nvxx_fifo_chan(chan);
 	uint32_t *push = pb_data->push;
 	int i, ret;
 
@@ -1164,6 +1166,9 @@ nouveau_gem_do_pushbuf(struct nouveau_pushbuf_data *pb_data)
 
 	for (i = 0; i < pb_data->nr_push * 2; i+=2)
 		nv50_dma_push(chan, push[i], push[i+1]);
+
+	/* per-channel watchdog to detect channel timeout */
+	fifo->timeout_start(fifo);
 
 	ret = nouveau_fence_emit_initted(pb_data->fence, pb_data->chan);
 	if (ret) {
@@ -1417,8 +1422,10 @@ nouveau_gem_ioctl_pushbuf_2(struct drm_device *dev, void *data,
 	return ret;
 
 out_recovery:
-	if (f)
+	if (f) {
 		fence_signal(&fence->base);
+		__close_fd(current->files, req->fence);
+	}
 out_fence:
 	nouveau_fence_unref(&fence);
 out_input_fence:
