@@ -2488,10 +2488,12 @@ static int binder_thread_write(struct binder_proc *proc,
 			}
 			if (buffer->async_transaction && buffer->target_node) {
 				BUG_ON(!buffer->target_node->has_async_transaction);
-				if (list_empty(&buffer->target_node->async_todo))
+				if (list_empty(&buffer->target_node->async_todo)) {
 					buffer->target_node->has_async_transaction = 0;
-				else
-					list_move_tail(buffer->target_node->async_todo.next, &thread->todo);
+				} else {
+					list_move_tail(buffer->target_node->async_todo.next, &proc->todo);
+					wake_up_interruptible(&proc->wait);
+				}
 			}
 			trace_binder_transaction_buffer_release(buffer);
 			binder_transaction_buffer_release(proc, buffer, NULL);
@@ -3310,6 +3312,28 @@ out:
 	return ret;
 }
 
+static int binder_ioctl_get_node_debug_info(struct binder_proc *proc,
+				struct binder_node_debug_info *info) {
+	struct rb_node *n;
+	binder_uintptr_t ptr = info->ptr;
+
+	memset(info, 0, sizeof(*info));
+
+	for (n = rb_first(&proc->nodes); n != NULL; n = rb_next(n)) {
+		struct binder_node *node = rb_entry(n, struct binder_node,
+						    rb_node);
+		if (node->ptr > ptr) {
+			info->ptr = node->ptr;
+			info->cookie = node->cookie;
+			info->has_strong_ref = node->has_strong_ref;
+			info->has_weak_ref = node->has_weak_ref;
+			break;
+		}
+	}
+
+	return 0;
+}
+
 static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	int ret;
@@ -3368,6 +3392,24 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		if (put_user_preempt_disabled(BINDER_CURRENT_PROTOCOL_VERSION,
 			     &ver->protocol_version)) {
 			ret = -EINVAL;
+			goto err;
+		}
+		break;
+	}
+	case BINDER_GET_NODE_DEBUG_INFO: {
+		struct binder_node_debug_info info;
+
+		if (copy_from_user(&info, ubuf, sizeof(info))) {
+			ret = -EFAULT;
+			goto err;
+		}
+
+		ret = binder_ioctl_get_node_debug_info(proc, &info);
+		if (ret < 0)
+			goto err;
+
+		if (copy_to_user(ubuf, &info, sizeof(info))) {
+			ret = -EFAULT;
 			goto err;
 		}
 		break;
