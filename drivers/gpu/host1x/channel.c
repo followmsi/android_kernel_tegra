@@ -44,6 +44,10 @@ int host1x_job_submit(struct host1x_job *job)
 	int i;
 	int err;
 
+	for (i = 0; i < job->num_syncpts; i++)
+		if (host->info->nb_pts <= job->syncpts[i].id)
+			return -EINVAL;
+
 	for (i = 0; i < job->num_syncpts; i++) {
 		err = host1x_module_busy(job->channel->client);
 		if (err < 0)
