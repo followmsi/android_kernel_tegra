@@ -1068,6 +1068,14 @@ int tegra_dvfs_core_update_thermal_index(enum tegra_dvfs_core_thermal_type type,
 	if (IS_ERR_OR_NULL(tegra_core_rail) || !tegra_core_rail->is_ready)
 		return -EINVAL;
 
+	if (type == TEGRA_DVFS_CORE_THERMAL_FLOOR) {
+		if (new_idx >= rail->therm_floors_size)
+			return -EINVAL;
+	} else if (type == TEGRA_DVFS_CORE_THERMAL_CAP) {
+		if (new_idx > rail->therm_caps_size)
+			return -EINVAL;
+	}
+
 	mutex_lock(&dvfs_lock);
 	if (type == TEGRA_DVFS_CORE_THERMAL_FLOOR) {
 		if (rail->therm_floor_idx != new_idx) {

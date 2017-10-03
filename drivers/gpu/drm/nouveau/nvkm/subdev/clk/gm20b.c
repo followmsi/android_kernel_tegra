@@ -1613,6 +1613,9 @@ gm20b_clk_throt_set_cdev_state(struct thermal_cooling_device *cdev,
 	int tstate, throt_cur_tstate, edp_cur_tstate;
 	unsigned long freq, cur_freq = ULONG_MAX;
 
+	if (cur_state > bthrot_ins->throt_tab_size)
+		return -EINVAL;
+
 	if (bthrot_ins->cur_state == cur_state)
 		return 0;
 
