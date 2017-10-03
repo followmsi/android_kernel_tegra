@@ -80,6 +80,9 @@ struct nvkm_vma {
 	u32 cached;
 
 	bool unmap_pending;
+
+	/* Radix tree index */
+	unsigned long index;
 };
 
 struct nvkm_dirty_vma {
