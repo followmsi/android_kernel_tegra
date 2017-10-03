@@ -40,6 +40,13 @@
 #include "nouveau_ttm.h"
 #include "nouveau_gem.h"
 
+static unsigned long
+_gen_radix_index(u64 offset, u64 delta, bool implicit)
+{
+	return (implicit ? 0x1UL << 63 : 0x0UL) | ((offset >> 12) << 32)  |
+		(delta >> 12);
+}
+
 /*
  * NV10-NV40 tiling helpers
  */
@@ -235,6 +242,7 @@ nouveau_bo_new(struct drm_device *dev, int size, int align,
 	INIT_LIST_HEAD(&nvbo->head);
 	INIT_LIST_HEAD(&nvbo->entry);
 	INIT_LIST_HEAD(&nvbo->vma_list);
+	INIT_RADIX_TREE(&nvbo->vma_tree, GFP_KERNEL);
 	mutex_init(&nvbo->vma_list_lock);
 	nvbo->vma_immutable = unchanged_vma_list;
 	nvbo->tile_mode = tile_mode;
@@ -1768,16 +1776,18 @@ nouveau_bo_subvma_find(struct nouveau_bo *nvbo, struct nvkm_vm *vm, u64 offset,
 	 * assigned offset for this mapping is and we are okay to reuse the
 	 * mapping).
 	 */
-	list_for_each_entry(vma, &nvbo->vma_list, head)
-		if (!vma->implicit &&
-		    (vma->vm == vm) &&
-		    (vma->delta == delta) &&
-		    (vma->length == length) &&
-		    (!offset || (vma->offset == offset)) &&
-		    !vma->unmap_pending) {
-			nouveau_bo_vma_list_unlock(nvbo);
-			return vma;
-		}
+	vma = radix_tree_lookup(&nvbo->vma_tree,
+			_gen_radix_index(offset, delta, false));
+	if (vma != NULL &&
+		!vma->implicit &&
+		(vma->vm == vm) &&
+		(vma->delta == delta) &&
+		(vma->length == length) &&
+		(!offset || (vma->offset == offset)) &&
+		!vma->unmap_pending) {
+		nouveau_bo_vma_list_unlock(nvbo);
+		return vma;
+	}
 
 	nouveau_bo_vma_list_unlock(nvbo);
 
@@ -1915,6 +1925,8 @@ nouveau_bo_vma_del(struct nouveau_bo *nvbo, struct nvkm_vma *vma)
 		nvkm_vm_put(vma);
 		nouveau_bo_vma_list_lock(nvbo);
 		list_del(&vma->head);
+		if (!vma->implicit)
+			radix_tree_delete(&nvbo->vma_tree, vma->index);
 		nouveau_bo_vma_list_unlock(nvbo);
 	}
 }
@@ -1945,6 +1957,8 @@ nouveau_bo_subvma_add(struct nouveau_bo *nvbo, struct nvkm_vm *vm,
 	nouveau_bo_vma_list_lock(nvbo);
 	WARN_ON(nvbo->vma_immutable);
 	list_add_tail(&vma->head, &nvbo->vma_list);
+	vma->index = _gen_radix_index(offset, delta, false);
+	radix_tree_insert(&nvbo->vma_tree, vma->index, vma);
 	nouveau_bo_vma_list_unlock(nvbo);
 	vma->refcount = 1;
 	return 0;

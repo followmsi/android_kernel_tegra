@@ -268,6 +268,8 @@ static void gem_unmap_work(struct work_struct *__work)
 	if (!nvbo->vma_immutable) {
 	    nouveau_bo_vma_list_lock(nvbo);
 	    list_del(&vma->head);
+		if (!vma->implicit)
+			radix_tree_delete(&nvbo->vma_tree, vma->index);
 	    nouveau_bo_vma_list_unlock(nvbo);
 	}
 
@@ -334,6 +336,8 @@ nouveau_gem_object_unmap(struct nouveau_bo *nvbo, struct nvkm_vma *vma)
 
 		WARN(1, "vma_immutable, remove the vma from list early.\n");
 		list_del(&vma->head);
+		if (!vma->implicit)
+			radix_tree_delete(&nvbo->vma_tree, vma->index);
 
 		pm_runtime_mark_last_busy(dev->dev);
 		pm_runtime_put_autosuspend(dev->dev);
