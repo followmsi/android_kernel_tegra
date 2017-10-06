@@ -473,12 +473,10 @@ static void validate_mm(struct mm_struct *mm)
 		struct anon_vma *anon_vma = vma->anon_vma;
 		struct anon_vma_chain *avc;
 
-		if (anon_vma) {
-			anon_vma_lock_read(anon_vma);
-			list_for_each_entry(avc, &vma->anon_vma_chain, same_vma)
-				anon_vma_interval_tree_verify(avc);
-			anon_vma_unlock_read(anon_vma);
-		}
+		vma_lock_anon_vma(vma);
+		list_for_each_entry(avc, &vma->anon_vma_chain, same_vma)
+			anon_vma_interval_tree_verify(avc);
+		vma_unlock_anon_vma(vma);
 
 		highest_address = vm_end_gap(vma);
 		vma = vma->vm_next;
@@ -2196,7 +2194,7 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 {
 	struct vm_area_struct *next;
 	unsigned long gap_addr;
-	int error = 0;
+	int error;
 
 	if (!(vma->vm_flags & VM_GROWSUP))
 		return -EFAULT;
@@ -2297,10 +2295,6 @@ int expand_downwards(struct vm_area_struct *vma,
 			return -ENOMEM;
 		/* Check that both stack segments have the same anon_vma? */
 	}
-
-	/* We must make sure the anon_vma is allocated. */
-	if (unlikely(anon_vma_prepare(vma)))
-		return -ENOMEM;
 
 	/*
 	 * vma->vm_start/vm_end cannot change under us because the caller
