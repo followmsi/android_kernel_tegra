@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm64 3.18.79 Kernel Configuration
+# Linux/arm64 3.18.87 Kernel Configuration
 #
 CONFIG_ARM64=y
 CONFIG_64BIT=y
@@ -4510,6 +4510,7 @@ CONFIG_DEBUG_ALIGN_RODATA=y
 # Security options
 #
 CONFIG_KEYS=y
+CONFIG_KEYS_COMPAT=y
 # CONFIG_PERSISTENT_KEYRINGS is not set
 # CONFIG_BIG_KEYS is not set
 # CONFIG_TRUSTED_KEYS is not set
@@ -4547,7 +4548,6 @@ CONFIG_DEFAULT_SECURITY_SELINUX=y
 CONFIG_DEFAULT_SECURITY="selinux"
 CONFIG_ARCH_HAS_ALT_SYSCALL=y
 # CONFIG_ALT_SYSCALL is not set
-CONFIG_KEYS_COMPAT=y
 CONFIG_CRYPTO=y
 
 #
