@@ -295,7 +295,7 @@ nvkm_pstate_info(struct nvkm_clk *clk, struct nvkm_pstate *pstate)
 		}
 	}
 
-	nv_info(clk, "%s: %s %s %s\n", name, info[0], info[1], info[2]);
+//	nv_info(clk, "%s: %s %s %s\n", name, info[0], info[1], info[2]);
 }
 
 static void
