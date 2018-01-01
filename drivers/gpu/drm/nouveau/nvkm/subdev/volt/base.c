@@ -192,7 +192,7 @@ _nvkm_volt_init(struct nvkm_object *object)
 		return 0;
 	}
 
-	nv_info(volt, "GPU voltage: %duv\n", ret);
+//	nv_info(volt, "GPU voltage: %duv\n", ret);
 	return 0;
 }
 
