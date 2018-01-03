@@ -383,10 +383,8 @@ nouveau_gem_object_close(struct drm_gem_object *gem, struct drm_file *file_priv)
 	list_for_each_entry_safe(vma, n, &nvbo->vma_list, head)
 		if (!vma->implicit &&
 		    (vma->vm == cli->vm) &&
-		    !vma->unmap_pending) {
+		    !vma->unmap_pending)
 			nouveau_gem_object_unmap(nvbo, vma);
-			drm_gem_object_unreference(&nvbo->gem);
-		}
 	nouveau_bo_vma_list_unlock(nvbo);
 
 	ttm_bo_unreserve(&nvbo->bo);
@@ -1838,7 +1836,7 @@ nouveau_gem_ioctl_map(struct drm_device *dev, void *data,
 
 	ret = ttm_bo_reserve(&nvbo->bo, false, false, false, NULL);
 	if (ret)
-		return ret;
+		goto error_bo_reserve;
 
 	old_page_shift = nvbo->page_shift;
 
@@ -1851,8 +1849,7 @@ nouveau_gem_ioctl_map(struct drm_device *dev, void *data,
 	if (vma) {
 		vma->refcount++;
 		req->offset = vma->offset;
-		ttm_bo_unreserve(&nvbo->bo);
-		return ret;
+		goto error_vma_exist;
 	}
 
 	/*
@@ -1961,12 +1958,20 @@ success:
 
 	ttm_bo_unreserve(&nvbo->bo);
 
+	/*
+	 * Release the gem object reference acquired by the function
+	 * "drm_gem_object_lookup" called at the beginning
+	 */
+	drm_gem_object_unreference_unlocked(gem);
+
 	return ret;
 
-error:
 	/* On failure, give up the gem object reference, delete the new vma. */
+error:
 	kfree(vma);
+error_vma_exist:
 	ttm_bo_unreserve(&nvbo->bo);
+error_bo_reserve:
 	drm_gem_object_unreference_unlocked(gem);
 
 	return ret;
@@ -1992,7 +1997,7 @@ nouveau_gem_ioctl_unmap(struct drm_device *dev, void *data,
 
 	ret = ttm_bo_reserve(&nvbo->bo, false, false, false, NULL);
 	if (ret)
-		return ret;
+		goto error_bo_reserve;
 
 	vma = nouveau_bo_subvma_find_offset(nvbo, cli->vm, req->offset);
 	if (!vma) {
@@ -2014,15 +2019,13 @@ nouveau_gem_ioctl_unmap(struct drm_device *dev, void *data,
 			flush_workqueue(drm->gem_unmap_wq);
 	}
 
-	/* Release the reference we kept from the map operation. */
-	drm_gem_object_unreference_unlocked(gem);
-
-error:
 	/*
 	 * Finally, in any case, release the reference acquired by this
 	 * function's call to drm_gem_object_lookup().
 	 */
+error:
 	ttm_bo_unreserve(&nvbo->bo);
+error_bo_reserve:
 	drm_gem_object_unreference_unlocked(gem);
 	return ret;
 }
