@@ -1,4 +1,4 @@
-/*
+f/*
  * Copyright © 2006-2014 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -2010,10 +2010,12 @@ static int __domain_mapping(struct dmar_domain *domain, unsigned long iov_pfn,
 		uint64_t tmp;
 
 		if (!sg_res) {
+			unsigned int pgoff = sg->offset & ~PAGE_MASK;
+
 			sg_res = aligned_nrpages(sg->offset, sg->length);
-			sg->dma_address = ((dma_addr_t)iov_pfn << VTD_PAGE_SHIFT) + sg->offset;
+			sg->dma_address = ((dma_addr_t)iov_pfn << VTD_PAGE_SHIFT) + pgoff;
 			sg->dma_length = sg->length;
-			pteval = (sg_phys(sg) & PAGE_MASK) | prot;
+			pteval = (sg_phys(sg) - pgoff) | prot;
 			phys_pfn = pteval >> VTD_PAGE_SHIFT;
 		}
 
@@ -2359,7 +2361,7 @@ static int iommu_prepare_identity_map(struct device *dev,
 	printk(KERN_INFO
 	       "IOMMU: Setting identity map for device %s [0x%Lx - 0x%Lx]\n",
 	       dev_name(dev), start, end);
-	
+
 	if (end < start) {
 		WARN(1, "Your BIOS is broken; RMRR ends before it starts!\n"
 			"BIOS vendor: %s; Ver: %s; Product Version: %s\n",
@@ -2701,7 +2703,7 @@ static int __init iommu_prepare_static_identity_mapping(int hw)
 
 			if (dev->bus != &acpi_bus_type)
 				continue;
-				
+
 			adev= to_acpi_device(dev);
 			mutex_lock(&adev->physical_node_lock);
 			list_for_each_entry(pn, &adev->physical_node_list, node) {
@@ -3558,7 +3560,7 @@ static int init_iommu_hw(void)
 				iommu_disable_protect_mem_regions(iommu);
 			continue;
 		}
-	
+
 		iommu_flush_write_buffer(iommu);
 
 		iommu_set_root_entry(iommu);
@@ -4590,7 +4592,7 @@ static void __init check_tylersburg_isoch(void)
 		iommu_identity_mapping |= IDENTMAP_AZALIA;
 		return;
 	}
-	
+
 	printk(KERN_WARNING "DMAR: Recommended TLB entries for ISOCH unit is 16; your BIOS set %d\n",
 	       vtisochctrl);
 }
