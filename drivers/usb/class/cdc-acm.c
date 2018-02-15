@@ -1091,6 +1091,7 @@ static int acm_probe(struct usb_interface *intf,
 	unsigned long quirks;
 	int num_rx_buf;
 	int i;
+	unsigned int elength = 0;
 	int combined_interfaces = 0;
 	struct device *tty_dev;
 	int rv = -ENOMEM;
@@ -1132,6 +1133,12 @@ static int acm_probe(struct usb_interface *intf,
 	}
 
 	while (buflen > 0) {
+		elength = buffer[0];
+		if ((buflen < elength) || (elength < 3)) {
+			dev_err(&intf->dev, "invalid descriptor buffer length\n");
+			break;
+		}
+
 		if (buffer[1] != USB_DT_CS_INTERFACE) {
 			dev_err(&intf->dev, "skipping garbage\n");
 			goto next_desc;
