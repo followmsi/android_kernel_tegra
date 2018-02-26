@@ -108,8 +108,6 @@ nvkm_fifo_channel_create_(struct nvkm_object *parent,
 	chan->addr = nv_device_resource_start(device, bar) +
 		     addr + size * chan->chid;
 	chan->size = size;
-	chan->timeout_start = nvkm_fifo_chan_timeout_start;
-	chan->timeout_stop = nvkm_fifo_chan_timeout_stop;
 	nvkm_event_send(&priv->cevent, 1, 0, NULL, 0);
 	return 0;
 }
@@ -302,18 +300,6 @@ void nvkm_fifo_chan_disable(struct nvkm_fifo *fifo, struct nvkm_fifo_chan *chan)
 	WARN_ON(!fifo->enable);
 	if (fifo->enable)
 		fifo->enable(chan, false);
-}
-
-void nvkm_fifo_chan_timeout_start(struct nvkm_fifo_chan *chan)
-{
-	if (chan->timeout_start)
-		chan->timeout_start(chan);
-}
-
-void nvkm_fifo_chan_timeout_stop(struct nvkm_fifo_chan *chan)
-{
-	if (chan->timeout_stop)
-		chan->timeout_stop(chan);
 }
 
 const char *

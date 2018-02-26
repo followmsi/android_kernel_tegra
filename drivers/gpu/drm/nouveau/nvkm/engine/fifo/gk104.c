@@ -58,28 +58,14 @@ struct gk104_fifo_chan {
 		KILLED
 	} state;
 	struct {
-		/* isr */
 		u32 sum_ms;
 		u32 limit_ms;
 		u32 gpfifo_get;
-		/* sw watchdog */
-		bool watchdog_inited;
-		struct delayed_work watchdog_work;
-		u32 watchdog_gpfifo_get;
-		spinlock_t watchdog_lock;
 	} timeout;
 };
 
 #define GRFIFO_TIMEOUT_CHECK_PERIOD_MS	100
 #define GRFIFO_TIMEOUT_DEFAULT		5000
-#define GRFIFO_CHAN_WATCHDOG_TIMEOUT_MS	10000
-
-static void
-gk104_fifo_sched_ctxsw_recover(struct gk104_fifo_priv *priv,
-		  struct nvkm_engine *engine, struct gk104_fifo_chan *chan);
-
-static inline struct nvkm_engine *
-gk104_fifo_engine(struct gk104_fifo_priv *priv, u32 engn);
 
 /*******************************************************************************
  * FIFO channel objects
@@ -136,142 +122,6 @@ gk104_fifo_chan_enable(struct nvkm_fifo_chan *chan, bool enable)
 	struct nvkm_engine *engine = nv_object(chan)->engine;
 	u32 state = enable ? 0x400 : 0x800;
 	nv_mask(engine, 0x800004 + (chan->chid * 8), state, state);
-}
-
-static void
-gk104_fifo_chan_timeout_start(struct nvkm_fifo_chan *chan)
-{
-	struct gk104_fifo_chan *ch = (void *)chan;
-	unsigned long flags;
-
-	spin_lock_irqsave(&ch->timeout.watchdog_lock, flags);
-	if (ch->timeout.watchdog_inited) {
-		spin_unlock_irqrestore(&ch->timeout.watchdog_lock, flags);
-		return;
-	}
-
-	ch->timeout.watchdog_gpfifo_get =
-		nv_ro32(nv_object(chan)->parent, 0x20);
-	ch->timeout.watchdog_inited = true;
-	spin_unlock_irqrestore(&ch->timeout.watchdog_lock, flags);
-
-	schedule_delayed_work(&ch->timeout.watchdog_work,
-			msecs_to_jiffies(GRFIFO_CHAN_WATCHDOG_TIMEOUT_MS));
-
-	nv_debug(ch, "start channel %d watchdog\n", ch->base.chid);
-}
-
-static void
-gk104_fifo_chan_timeout_stop(struct nvkm_fifo_chan *chan)
-{
-	struct gk104_fifo_chan *ch = (void *)chan;
-	unsigned long flags;
-
-	spin_lock_irqsave(&ch->timeout.watchdog_lock, flags);
-	if (!ch->timeout.watchdog_inited) {
-		spin_unlock_irqrestore(&ch->timeout.watchdog_lock, flags);
-		return;
-	}
-	spin_unlock_irqrestore(&ch->timeout.watchdog_lock, flags);
-
-	cancel_delayed_work(&ch->timeout.watchdog_work);
-
-	spin_lock_irqsave(&ch->timeout.watchdog_lock, flags);
-	ch->timeout.watchdog_inited = false;
-	spin_unlock_irqrestore(&ch->timeout.watchdog_lock, flags);
-
-	nv_debug(ch, "stop channel %d watchdog\n", ch->base.chid);
-}
-
-static void
-gk104_fifo_chan_timeout_work(struct work_struct *work)
-{
-	struct gk104_fifo_chan *ch;
-	struct gk104_fifo_priv *priv;
-	struct nvkm_object *object;
-	struct device *dev;
-	unsigned long flags;
-	u32 chid;
-	u32 pre, cur;
-	int ret, quit = 0;
-
-	ch = container_of(to_delayed_work(work), struct gk104_fifo_chan,
-			timeout.watchdog_work);
-	chid = ch->base.chid;
-	object = (void *)ch;
-	priv = (void *)object->engine;
-	dev = nv_device_base(nv_device(priv));
-
-	/* check timed out job */
-	spin_lock_irqsave(&ch->timeout.watchdog_lock, flags);
-	pre = ch->timeout.watchdog_gpfifo_get;
-	if (!ch->timeout.watchdog_inited)
-		quit = 1;
-	ch->timeout.watchdog_inited = false;
-	spin_unlock_irqrestore(&ch->timeout.watchdog_lock, flags);
-
-	if (quit)
-		return;
-
-	ret = pm_runtime_get_sync(dev);
-
-	cur = nv_ro32(nv_object(ch)->parent, 0x20);
-	if (cur != pre) {
-		/* we have some progress, so re-start timer and keep monitoring */
-		gk104_fifo_chan_timeout_start(&ch->base);
-		goto skip_recovery;
-	}
-
-	/* the channel is stuck, so recover from that  */
-	nv_error(ch, "Channel %d timed out\n", chid);
-
-	nvkm_fifo_eevent(&priv->base, chid,
-			NOUVEAU_GEM_CHANNEL_FIFO_ERROR_IDLE_TIMEOUT);
-	gk104_fifo_sched_ctxsw_recover(priv, gk104_fifo_engine(priv, 0),
-			ch);
-
-skip_recovery:
-	if (ret >= 0 || ret == -EACCES) {
-		pm_runtime_mark_last_busy(dev);
-		pm_runtime_put_autosuspend(dev);
-	}
-}
-
-static bool
-gk104_fifo_chan_timeout_restart_all(struct gk104_fifo_priv *priv,
-		int exception)
-{
-	struct gk104_fifo_chan *ch;
-	unsigned long flags;
-	int i, ret;
-
-	for (i = priv->base.min; i < priv->base.max; i++) {
-		if (!(ch = (void *)priv->base.channel[i]))
-			continue;
-
-		spin_lock_irqsave(&ch->timeout.watchdog_lock, flags);
-		if (!ch->timeout.watchdog_inited) {
-			spin_unlock_irqrestore(&ch->timeout.watchdog_lock, flags);
-			continue;
-		}
-		spin_unlock_irqrestore(&ch->timeout.watchdog_lock, flags);
-
-		ret = cancel_delayed_work(&ch->timeout.watchdog_work);
-		if (!ret)
-			return ret;
-
-		/*
-		 * We will handle timeout for this faulted channel , so no
-		 * need to schedule another work.
-		 */
-		if (i == exception)
-			continue;
-
-		schedule_delayed_work(&ch->timeout.watchdog_work,
-				msecs_to_jiffies(GRFIFO_CHAN_WATCHDOG_TIMEOUT_MS));
-	}
-
-	return true;
 }
 
 static int
@@ -430,11 +280,6 @@ gk104_fifo_chan_ctor(struct nvkm_object *parent, struct nvkm_object *engine,
 	chan->timeout.sum_ms = 0;
 	chan->timeout.limit_ms = GRFIFO_TIMEOUT_DEFAULT;
 	chan->timeout.gpfifo_get = 0;
-	spin_lock_init(&chan->timeout.watchdog_lock);
-	INIT_DELAYED_WORK(&chan->timeout.watchdog_work,
-			gk104_fifo_chan_timeout_work);
-	chan->base.timeout_start = gk104_fifo_chan_timeout_start;
-	chan->base.timeout_stop = gk104_fifo_chan_timeout_stop;
 
 	return 0;
 }
@@ -479,8 +324,6 @@ gk104_fifo_chan_fini(struct nvkm_object *object, bool suspend)
 				chan->engine);
 		return -ETIMEDOUT;
 	}
-
-	gk104_fifo_chan_timeout_stop(&chan->base);
 
 	if (chan->state == RUNNING && (chan->state = STOPPED) == STOPPED) {
 		nvkm_fifo_chan_disable(&priv->base, &chan->base);
@@ -690,7 +533,6 @@ gk104_fifo_mmu_fault_recover_work(struct work_struct *work)
 {
 	struct gk104_fifo_priv *priv = container_of(work, typeof(*priv), mmu_fault);
 	struct gk104_fifo_chan *chan;
-	struct device *dev = nv_device_base(nv_device(priv));
 	struct nvkm_pmu *pmu = nvkm_pmu(priv);
 	struct nvkm_gr *gr = nvkm_gr(priv);
 	struct nvkm_object *engine;
@@ -699,9 +541,6 @@ gk104_fifo_mmu_fault_recover_work(struct work_struct *work)
 	u64 mask, todo;
 	bool halt_fecs = false;
 	u32 grfifo_ctrl;
-	int ret;
-
-	ret = pm_runtime_get_sync(dev);
 
 	spin_lock_irqsave(&priv->base.lock, flags);
 	mask = priv->mask;
@@ -753,11 +592,6 @@ gk104_fifo_mmu_fault_recover_work(struct work_struct *work)
 		pmu->enable_clk_gating(pmu);
 
 	nv_error(priv, "channel clean up done\n");
-
-	if (ret >= 0 || ret == -EACCES) {
-		pm_runtime_mark_last_busy(dev);
-		pm_runtime_put_autosuspend(dev);
-	}
 }
 
 static void
@@ -931,11 +765,9 @@ gk104_fifo_intr_sched_ctxsw(struct gk104_fifo_priv *priv)
 						GRFIFO_TIMEOUT_CHECK_PERIOD_MS)) {
 				nvkm_fifo_eevent(&priv->base, chid,
 						NOUVEAU_GEM_CHANNEL_FIFO_ERROR_IDLE_TIMEOUT);
-				if (gk104_fifo_chan_timeout_restart_all(priv, chid)) {
-					nv_error(priv, "recovering ctxsw timeout for ch %d\n",
-							chid);
-					gk104_fifo_sched_ctxsw_recover(priv, engine, chan);
-				}
+				nv_error(priv, "recovering ctxsw timeout for ch %d\n",
+						chid);
+				gk104_fifo_sched_ctxsw_recover(priv, engine, chan);
 			} else {
 				_update_recovery_delay(priv);
 				nv_error(priv, "fifo waiting for ctxsw %d ms on ch %d\n",

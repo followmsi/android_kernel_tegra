@@ -148,7 +148,6 @@ static int
 nouveau_fence_update(struct nouveau_channel *chan, struct nouveau_fence_chan *fctx)
 {
 	struct nouveau_fence *fence;
-	struct nvkm_fifo_chan *fifo = nvxx_fifo_chan(chan);
 	int drop = 0;
 	u32 seq = fctx->read(chan);
 
@@ -160,9 +159,6 @@ nouveau_fence_update(struct nouveau_channel *chan, struct nouveau_fence_chan *fc
 
 		drop |= nouveau_fence_signal(fence);
 	}
-
-	if (drop)
-		fifo->timeout_stop(fifo);
 
 	return drop;
 }
