@@ -529,6 +529,55 @@ gk104_fifo_engine(struct gk104_fifo_priv *priv, u32 engn)
 }
 
 static void
+gk104_fifo_recover_work(struct work_struct *work)
+{
+	struct gk104_fifo_priv *priv = container_of(work, typeof(*priv), fault);
+	struct nvkm_object *engine;
+	unsigned long flags;
+	u32 engn, engm = 0;
+	u64 mask, todo;
+
+	spin_lock_irqsave(&priv->base.lock, flags);
+	mask = priv->mask;
+	priv->mask = 0ULL;
+	spin_unlock_irqrestore(&priv->base.lock, flags);
+
+	for (todo = mask; engn = __ffs64(todo), todo; todo &= ~(1 << engn))
+		engm |= 1 << gk104_fifo_engidx(priv, engn);
+	nv_mask(priv, 0x002630, engm, engm);
+
+	for (todo = mask; engn = __ffs64(todo), todo; todo &= ~(1 << engn)) {
+		if ((engine = (void *)nvkm_engine(priv, engn))) {
+			nv_ofuncs(engine)->fini(engine, false);
+			WARN_ON(nv_ofuncs(engine)->init(engine));
+		}
+		gk104_fifo_runlist_update(priv, gk104_fifo_engidx(priv, engn));
+	}
+
+	nv_wr32(priv, 0x00262c, engm);
+	nv_mask(priv, 0x002630, engm, 0x00000000);
+}
+
+static void
+gk104_fifo_recover(struct gk104_fifo_priv *priv, struct nvkm_engine *engine,
+		  struct gk104_fifo_chan *chan)
+{
+	u32 chid = chan->base.chid;
+	unsigned long flags;
+
+	nv_error(priv, "%s engine fault on channel %d, recovering...\n",
+		       nv_subdev(engine)->name, chid);
+
+	nvkm_fifo_chan_disable(&priv->base, &chan->base);
+	chan->state = KILLED;
+
+	spin_lock_irqsave(&priv->base.lock, flags);
+	priv->mask |= 1ULL << nv_engidx(engine);
+	spin_unlock_irqrestore(&priv->base.lock, flags);
+	schedule_work(&priv->fault);
+}
+
+static void
 gk104_fifo_mmu_fault_recover_work(struct work_struct *work)
 {
 	struct gk104_fifo_priv *priv = container_of(work, typeof(*priv), mmu_fault);
@@ -586,7 +635,7 @@ gk104_fifo_mmu_fault_recover_work(struct work_struct *work)
 	nv_wr32(priv, 0x00259c, unit);
 	nv_wr32(priv, 0x00262c, engm);
 	nv_mask(priv, 0x002630, engm, 0x00000000);
-	nv_mask(priv, 0x002140, 0x10000100, 0x10000100);
+	nv_mask(priv, 0x002140, 0x10000000, 0x10000000);
 
 	if (pmu->enable_clk_gating)
 		pmu->enable_clk_gating(pmu);
@@ -603,7 +652,7 @@ gk104_fifo_mmu_fault_recover(struct gk104_fifo_priv *priv,
 	unsigned long flags;
 	u32 grfifo_ctrl;
 
-	nv_error(priv, "%s engine mmu fault on channel %d\n",
+	nv_error(priv, "%s engine fault on channel %d, recovering...\n",
 		       nv_subdev(engine)->name, chid);
 
 	grfifo_ctrl = nv_rd32(priv, 0x400500);
@@ -625,28 +674,6 @@ gk104_fifo_mmu_fault_recover(struct gk104_fifo_priv *priv,
 
 	/* Do the real recovery work */
 	queue_work(system_highpri_wq, &priv->mmu_fault);
-}
-
-static void
-gk104_fifo_sched_ctxsw_recover(struct gk104_fifo_priv *priv,
-		  struct nvkm_engine *engine, struct gk104_fifo_chan *chan)
-{
-	u32 chid = chan->base.chid;
-
-	nv_error(priv, "%s engine sched ctxsw timeout on channel %d\n",
-		       nv_subdev(engine)->name, chid);
-
-	/* disable interrupt */
-	nv_mask(priv, 0x002140, 0x10000100, 0x00000000);
-	nv_wr32(priv, 0x002100, 0x00000100);
-	/* trigger mmu fault */
-	nv_wr32(priv, 0x002a30, 0x00000100);
-	if (!nv_wait(priv, 0x002100, 0x10000000, 0x10000000))
-		nv_error(priv, "triggering mmu fault timed out\n");
-	nv_wr32(priv, 0x002a30, 0x00000000);
-
-	/* handle fake mmu fault */
-	gk104_fifo_mmu_fault_recover(priv, engine, chan, 0);
 }
 
 static int
@@ -753,11 +780,9 @@ gk104_fifo_intr_sched_ctxsw(struct gk104_fifo_priv *priv)
 						GRFIFO_TIMEOUT_CHECK_PERIOD_MS)) {
 				nvkm_fifo_eevent(&priv->base, chid,
 						NOUVEAU_GEM_CHANNEL_FIFO_ERROR_IDLE_TIMEOUT);
-				nv_error(priv, "recovering ctxsw timeout for ch %d\n",
-						chid);
-				gk104_fifo_sched_ctxsw_recover(priv, engine, chan);
+				gk104_fifo_recover(priv, engine, chan);
 			} else {
-				nv_error(priv, "fifo waiting for ctxsw %d ms on ch %d\n",
+				nv_debug(priv, "fifo waiting for ctxsw %d ms on ch %d\n",
 						chan->timeout.sum_ms, chid);
 			}
 		}
@@ -1314,6 +1339,7 @@ gk104_fifo_ctor(struct nvkm_object *parent, struct nvkm_object *engine,
 	if (ret)
 		return ret;
 
+	INIT_WORK(&priv->fault, gk104_fifo_recover_work);
 	INIT_WORK(&priv->mmu_fault, gk104_fifo_mmu_fault_recover_work);
 
 	priv->engine = kzalloc(impl->num_engine * sizeof(priv->engine[0]),
