@@ -592,13 +592,13 @@ nouveau_do_suspend(struct drm_device *dev, bool runtime)
 
 	NV_INFO(drm, "waiting for kernel channels to go idle...\n");
 	if (drm->cechan) {
-		ret = nouveau_channel_idle_suspend(drm->cechan);
+		ret = nouveau_channel_idle(drm->cechan);
 		if (ret)
 			goto fail_display;
 	}
 
 	if (drm->channel) {
-		ret = nouveau_channel_idle_suspend(drm->channel);
+		ret = nouveau_channel_idle(drm->channel);
 		if (ret)
 			goto fail_display;
 	}
@@ -631,7 +631,7 @@ nouveau_do_suspend(struct drm_device *dev, bool runtime)
 			list_for_each_entry(chan, &abi16->channels, head) {
 				if (chan->chan->faulty)
 					continue;
-				ret = nouveau_channel_idle_suspend(chan->chan);
+				ret = nouveau_channel_idle(chan->chan);
 				if (ret) {
 					mutex_unlock(&cli->mutex);
 					goto fail_display;
