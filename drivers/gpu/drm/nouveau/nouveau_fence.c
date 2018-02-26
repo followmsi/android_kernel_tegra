@@ -631,7 +631,7 @@ static void nouveau_fence_timeline_value_str(struct fence *fence, char *str,
 	struct nouveau_fence_chan *fctx = nouveau_fctx(f);
 	u32 cur;
 
-	cur = (!fctx->dead && f->channel) ? fctx->read(f->channel) : 0;
+	cur = f->channel ? fctx->read(f->channel) : 0;
 	snprintf(str, size, "%d", cur);
 }
 
