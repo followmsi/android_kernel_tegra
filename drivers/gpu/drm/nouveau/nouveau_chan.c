@@ -152,41 +152,16 @@ void
 nouveau_channel_del(struct nouveau_channel **pchan)
 {
 	struct nouveau_channel *chan = *pchan;
-	bool idle = false, do_recovery = false;
-	int ret;
+	bool idle = false;
 
 	if (chan) {
-repeat:
 		mutex_lock(&chan->recovery_lock);
-
-		/* if recovery has not finished, yield */
-		if (chan->need_recovery) {
-			mutex_unlock(&chan->recovery_lock);
-			schedule();
-			goto repeat;
-		}
-
 		if (chan->pushbuf_thread) {
 			kthread_stop(chan->pushbuf_thread);
 			chan->pushbuf_thread = NULL;
-			ret = nouveau_channel_idle(chan);
+			nouveau_channel_idle(chan);
 			idle = true;
-			/*
-			 * We might fail to idle channel because the channel gets stuck
-			 * and channel deletion is requested even before the timeout
-			 * is detected. So here we give the fence timeout work a chance
-			 * to clean up the channel and then delete it further.
-			 */
-			if (ret && !do_recovery) {
-				WARN(1, "channel %d might need recovery, yield\n",
-					  chan->chid);
-				mutex_unlock(&chan->recovery_lock);
-				schedule();
-				do_recovery = true;
-				goto repeat;
-			}
 		}
-
 		if (chan->fence) {
 			if (!idle && !chan->faulty)
 				nouveau_channel_idle(chan);

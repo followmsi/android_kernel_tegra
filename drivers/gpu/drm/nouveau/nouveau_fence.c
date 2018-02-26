@@ -181,23 +181,21 @@ nouveau_fence_fault_work(struct work_struct *work)
 				chan->chid);
 		kthread_stop(chan->pushbuf_thread);
 		chan->pushbuf_thread = NULL;
+
+		spin_lock(&chan->pushbuf_lock);
+		chan->faulty = true;
+		spin_unlock(&chan->pushbuf_lock);
+
+		nouveau_gem_pushbuf_drain_queue(chan);
+
+		nouveau_bo_wr32(priv->bo, chan->chid * 16 / 4, fctx->sequence);
+		nouveau_bo_rd32(priv->bo, chan->chid * 16 / 4);
+
+		NV_PRINTK(error, cli, "signaling pending fences\n");
+		nouveau_fence_context_clear(fctx);
+
+		NV_PRINTK(error, cli, "fence recovery done\n");
 	}
-
-	spin_lock(&chan->pushbuf_lock);
-	chan->faulty = true;
-	spin_unlock(&chan->pushbuf_lock);
-
-	nouveau_gem_pushbuf_drain_queue(chan);
-
-	nouveau_bo_wr32(priv->bo, chan->chid * 16 / 4, fctx->sequence);
-	nouveau_bo_rd32(priv->bo, chan->chid * 16 / 4);
-
-	NV_PRINTK(error, cli, "signaling pending fences\n");
-	nouveau_fence_context_clear(fctx);
-
-	NV_PRINTK(error, cli, "fence recovery done\n");
-
-	chan->need_recovery = false;
 
 	mutex_unlock(&chan->recovery_lock);
 }
@@ -214,7 +212,6 @@ nouveau_fence_wait_uevent_handler(struct nvif_notify *notify)
 		struct nouveau_cli *cli = (void *)nvif_client(fctx->chan->object);
 
 		NV_PRINTK(error, cli, "scheduling fence recovery work\n");
-		fctx->chan->need_recovery = true;
 		schedule_work(&fctx->fault_work);
 		return ret;
 	}

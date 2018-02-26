@@ -55,7 +55,6 @@ struct nouveau_channel {
 	} error_notifier;
 
 	bool faulty;
-	bool need_recovery;
 	struct mutex recovery_lock;
 };
 
