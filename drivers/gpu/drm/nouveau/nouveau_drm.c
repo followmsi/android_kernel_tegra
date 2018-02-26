@@ -576,13 +576,6 @@ nouveau_do_suspend(struct drm_device *dev, bool runtime)
 	struct nouveau_cli *cli;
 	int ret;
 
-	if (time_before_eq(jiffies, drm->recovery_delay)) {
-		NV_INFO(drm, "Recovery in progress, aborting suspend...\n");
-		return -EBUSY;
-	} else {
-		drm->recovery_delay = 0;
-	}
-
 	if (dev->mode_config.num_crtc) {
 		NV_INFO(drm, "suspending console...\n");
 		nouveau_fbcon_set_suspend(dev, 1);

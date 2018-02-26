@@ -724,18 +724,6 @@ gk104_fifo_update_timeout(struct gk104_fifo_priv *priv,
 }
 
 static void
-_update_recovery_delay(struct gk104_fifo_priv *priv)
-{
-	struct device *dev = nv_device_base(nv_device(priv));
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct drm_device *drm_dev = pci_get_drvdata(pdev);
-	struct nouveau_drm *drm = nouveau_drm(drm_dev);
-
-	pm_runtime_mark_last_busy(dev);
-	drm->recovery_delay = jiffies + 10 * HZ;
-}
-
-static void
 gk104_fifo_intr_sched_ctxsw(struct gk104_fifo_priv *priv)
 {
 	struct nvkm_engine *engine;
@@ -769,7 +757,6 @@ gk104_fifo_intr_sched_ctxsw(struct gk104_fifo_priv *priv)
 						chid);
 				gk104_fifo_sched_ctxsw_recover(priv, engine, chan);
 			} else {
-				_update_recovery_delay(priv);
 				nv_error(priv, "fifo waiting for ctxsw %d ms on ch %d\n",
 						chan->timeout.sum_ms, chid);
 			}
@@ -992,7 +979,6 @@ gk104_fifo_intr_fault(struct gk104_fifo_priv *priv, int unit)
 			nvkm_fifo_eevent(&priv->base,
 					((struct nvkm_fifo_chan*)object)->chid,
 					NOUVEAU_GEM_CHANNEL_FIFO_ERROR_MMU_ERR_FLT);
-			_update_recovery_delay(priv);
 			gk104_fifo_mmu_fault_recover(priv, engine, (void *)object, unit);
 			break;
 		}
