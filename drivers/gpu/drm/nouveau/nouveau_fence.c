@@ -148,7 +148,6 @@ static int
 nouveau_fence_update(struct nouveau_channel *chan, struct nouveau_fence_chan *fctx)
 {
 	struct nouveau_fence *fence;
-	struct nvkm_fifo_chan *fifo = nvxx_fifo_chan(chan);
 	int drop = 0;
 	u32 seq = fctx->read(chan);
 
@@ -160,9 +159,6 @@ nouveau_fence_update(struct nouveau_channel *chan, struct nouveau_fence_chan *fc
 
 		drop |= nouveau_fence_signal(fence);
 	}
-
-	if (drop)
-		fifo->timeout_stop(fifo);
 
 	return drop;
 }
@@ -185,23 +181,21 @@ nouveau_fence_fault_work(struct work_struct *work)
 				chan->chid);
 		kthread_stop(chan->pushbuf_thread);
 		chan->pushbuf_thread = NULL;
+
+		spin_lock(&chan->pushbuf_lock);
+		chan->faulty = true;
+		spin_unlock(&chan->pushbuf_lock);
+
+		nouveau_gem_pushbuf_drain_queue(chan);
+
+		nouveau_bo_wr32(priv->bo, chan->chid * 16 / 4, fctx->sequence);
+		nouveau_bo_rd32(priv->bo, chan->chid * 16 / 4);
+
+		NV_PRINTK(error, cli, "signaling pending fences\n");
+		nouveau_fence_context_clear(fctx);
+
+		NV_PRINTK(error, cli, "fence recovery done\n");
 	}
-
-	spin_lock(&chan->pushbuf_lock);
-	chan->faulty = true;
-	spin_unlock(&chan->pushbuf_lock);
-
-	nouveau_gem_pushbuf_drain_queue(chan);
-
-	nouveau_bo_wr32(priv->bo, chan->chid * 16 / 4, fctx->sequence);
-	nouveau_bo_rd32(priv->bo, chan->chid * 16 / 4);
-
-	NV_PRINTK(error, cli, "signaling pending fences\n");
-	nouveau_fence_context_clear(fctx);
-
-	NV_PRINTK(error, cli, "fence recovery done\n");
-
-	chan->need_recovery = false;
 
 	mutex_unlock(&chan->recovery_lock);
 }
@@ -218,7 +212,6 @@ nouveau_fence_wait_uevent_handler(struct nvif_notify *notify)
 		struct nouveau_cli *cli = (void *)nvif_client(fctx->chan->object);
 
 		NV_PRINTK(error, cli, "scheduling fence recovery work\n");
-		fctx->chan->need_recovery = true;
 		schedule_work(&fctx->fault_work);
 		return ret;
 	}
@@ -434,13 +427,12 @@ nouveau_fence_wait_legacy(struct fence *f, bool intr, long wait)
 }
 
 static int
-nouveau_fence_wait_busy(struct nouveau_fence *fence, bool intr,
-		unsigned long timeout)
+nouveau_fence_wait_busy(struct nouveau_fence *fence, bool intr)
 {
 	int ret = 0;
 
 	while (!nouveau_fence_done(fence)) {
-		if (time_after_eq(jiffies, timeout)) {
+		if (time_after_eq(jiffies, fence->timeout)) {
 			ret = -EBUSY;
 			break;
 		}
@@ -460,13 +452,12 @@ nouveau_fence_wait_busy(struct nouveau_fence *fence, bool intr,
 }
 
 int
-nouveau_fence_wait_timeout(struct nouveau_fence *fence, bool lazy, bool intr,
-		unsigned long timeout)
+nouveau_fence_wait(struct nouveau_fence *fence, bool lazy, bool intr)
 {
 	long ret;
 
 	if (!lazy)
-		return nouveau_fence_wait_busy(fence, intr, timeout);
+		return nouveau_fence_wait_busy(fence, intr);
 
 	ret = fence_wait_timeout(&fence->base, intr, 15 * HZ);
 	if (ret < 0)
@@ -475,12 +466,6 @@ nouveau_fence_wait_timeout(struct nouveau_fence *fence, bool lazy, bool intr,
 		return -EBUSY;
 	else
 		return 0;
-}
-
-int
-nouveau_fence_wait(struct nouveau_fence *fence, bool lazy, bool intr)
-{
-	return nouveau_fence_wait_timeout(fence, lazy, intr, fence->timeout);
 }
 
 int
@@ -646,7 +631,7 @@ static void nouveau_fence_timeline_value_str(struct fence *fence, char *str,
 	struct nouveau_fence_chan *fctx = nouveau_fctx(f);
 	u32 cur;
 
-	cur = (!fctx->dead && f->channel) ? fctx->read(f->channel) : 0;
+	cur = f->channel ? fctx->read(f->channel) : 0;
 	snprintf(str, size, "%d", cur);
 }
 

@@ -55,7 +55,6 @@ struct nouveau_channel {
 	} error_notifier;
 
 	bool faulty;
-	bool need_recovery;
 	struct mutex recovery_lock;
 };
 
@@ -65,7 +64,6 @@ int  nouveau_channel_new(struct nouveau_drm *, struct nvif_device *,
 			 struct nouveau_channel **);
 void nouveau_channel_del(struct nouveau_channel **);
 int  nouveau_channel_idle(struct nouveau_channel *);
-int  nouveau_channel_idle_suspend(struct nouveau_channel *);
 int nouveau_channel_init_error_notifier(struct nouveau_channel *chan,
 					struct drm_file *file,
 					u32 handle, u32 offset);

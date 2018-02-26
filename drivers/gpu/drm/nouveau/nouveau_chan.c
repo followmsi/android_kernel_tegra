@@ -44,20 +44,18 @@ MODULE_PARM_DESC(vram_pushbuf, "Create DMA push buffers in VRAM");
 int nouveau_vram_pushbuf;
 module_param_named(vram_pushbuf, nouveau_vram_pushbuf, int, 0400);
 
-static int
-_nouveau_channel_idle(struct nouveau_channel *chan, bool suspend)
+int
+nouveau_channel_idle(struct nouveau_channel *chan)
 {
 	struct nouveau_cli *cli = (void *)nvif_client(chan->object);
 	struct nouveau_fence *fence = NULL;
-	unsigned long timeout;
 	int ret;
 
 	mutex_lock(&chan->fifo_lock);
 	ret = nouveau_fence_new(chan, false, &fence);
 	mutex_unlock(&chan->fifo_lock);
 	if (!ret) {
-		timeout = suspend ? jiffies + 5 * HZ : fence->timeout;
-		ret = nouveau_fence_wait_timeout(fence, false, false, timeout);
+		ret = nouveau_fence_wait(fence, false, false);
 		nouveau_fence_unref(&fence);
 	}
 
@@ -65,18 +63,6 @@ _nouveau_channel_idle(struct nouveau_channel *chan, bool suspend)
 		NV_PRINTK(error, cli, "failed to idle channel 0x%08x [%s]\n",
 			  chan->object->handle, nvxx_client(&cli->base)->name);
 	return ret;
-}
-
-int
-nouveau_channel_idle(struct nouveau_channel *chan)
-{
-	return _nouveau_channel_idle(chan, false);
-}
-
-int
-nouveau_channel_idle_suspend(struct nouveau_channel *chan)
-{
-	return _nouveau_channel_idle(chan, true);
 }
 
 void
@@ -152,41 +138,16 @@ void
 nouveau_channel_del(struct nouveau_channel **pchan)
 {
 	struct nouveau_channel *chan = *pchan;
-	bool idle = false, do_recovery = false;
-	int ret;
+	bool idle = false;
 
 	if (chan) {
-repeat:
 		mutex_lock(&chan->recovery_lock);
-
-		/* if recovery has not finished, yield */
-		if (chan->need_recovery) {
-			mutex_unlock(&chan->recovery_lock);
-			schedule();
-			goto repeat;
-		}
-
 		if (chan->pushbuf_thread) {
 			kthread_stop(chan->pushbuf_thread);
 			chan->pushbuf_thread = NULL;
-			ret = nouveau_channel_idle(chan);
+			nouveau_channel_idle(chan);
 			idle = true;
-			/*
-			 * We might fail to idle channel because the channel gets stuck
-			 * and channel deletion is requested even before the timeout
-			 * is detected. So here we give the fence timeout work a chance
-			 * to clean up the channel and then delete it further.
-			 */
-			if (ret && !do_recovery) {
-				WARN(1, "channel %d might need recovery, yield\n",
-					  chan->chid);
-				mutex_unlock(&chan->recovery_lock);
-				schedule();
-				do_recovery = true;
-				goto repeat;
-			}
 		}
-
 		if (chan->fence) {
 			if (!idle && !chan->faulty)
 				nouveau_channel_idle(chan);
