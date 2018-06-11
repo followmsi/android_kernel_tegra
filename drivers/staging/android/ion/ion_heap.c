@@ -38,7 +38,7 @@ void *ion_heap_map_kernel(struct ion_heap *heap,
 	struct page **tmp = pages;
 
 	if (!pages)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	pgprot = ion_pgprot_memorytype(heap->flags, buffer->flags, PAGE_KERNEL);
 
