@@ -1325,7 +1325,7 @@ gf100_gr_intr(struct nvkm_subdev *subdev)
 	u32 mthd = (addr & 0x00003ffc);
 	u32 subc = (addr & 0x00070000) >> 16;
 	u32 data = nv_rd32(priv, 0x400708);
-	u32 code = nv_rd32(priv, 0x400110);
+//	u32 code = nv_rd32(priv, 0x400110);
 	u32 class;
 	int chid;
 
@@ -1382,14 +1382,14 @@ gf100_gr_intr(struct nvkm_subdev *subdev)
 	}
 
 	if (stat & 0x00100000) {
-		nv_error(priv, "DATA_ERROR [");
-		nvkm_enum_print(nv50_data_error_names, code);
-		pr_cont("] ch %d [0x%010llx %s] subc %d class 0x%04x mthd 0x%04x data 0x%08x\n",
+		//nv_error(priv, "DATA_ERROR [");
+		//nvkm_enum_print(nv50_data_error_names, code);
+		/*pr_cont("] ch %d [0x%010llx %s] subc %d class 0x%04x mthd 0x%04x data 0x%08x\n",
 			chid, inst << 12, nvkm_client_name(engctx), subc,
-			class, mthd, data);
+			class, mthd, data);*/
 		nv_wr32(priv, 0x400100, 0x00100000);
 		stat &= ~0x00100000;
-		nvkm_fifo_eevent(pfifo, chid, NOUVEAU_GEM_CHANNEL_GR_ERROR_SW_NOTIFY);
+		//nvkm_fifo_eevent(pfifo, chid, NOUVEAU_GEM_CHANNEL_GR_ERROR_SW_NOTIFY);
 	}
 
 	if (stat & 0x00200000) {
