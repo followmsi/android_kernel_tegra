@@ -118,7 +118,7 @@ static void sync_print_pt(struct seq_file *s, struct fence *pt, bool fence)
 	if (pt->ops->get_timeline_name)
 		seq_printf(s, " tl %s", pt->ops->get_timeline_name(pt));
 
-	seq_printf(s, " [%pP]", pt);
+	seq_printf(s, " [%pK]", pt);
 
 	seq_puts(s, "\n");
 }
@@ -155,7 +155,7 @@ static void sync_print_fence(struct seq_file *s, struct sync_fence *fence)
 	unsigned long flags;
 	int i;
 
-	seq_printf(s, "[%pP] %s: %s\n", fence, fence->name,
+	seq_printf(s, "[%pK] %s: %s\n", fence, fence->name,
 		   sync_status_str(atomic_read(&fence->status)));
 
 	for (i = 0; i < fence->num_fences; ++i) {
