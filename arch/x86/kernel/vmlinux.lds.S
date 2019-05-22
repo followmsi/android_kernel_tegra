@@ -105,9 +105,10 @@ SECTIONS
 		SOFTIRQENTRY_TEXT
 		*(.fixup)
 		*(.gnu.warning)
-		/* End of text section */
-		_etext = .;
 	} :text = 0x9090
+
+	/* End of text section */
+	_etext = .;
 
 	NOTES :text :note
 
