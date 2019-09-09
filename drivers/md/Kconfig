@@ -503,5 +503,4 @@ config DM_LOG_WRITES
 	  be called dm-log-writes.
 
 	  If unsure, say N.
->>>>>>> f559c8d... ANDROID: dm: Add android verity target
 endif # MD
