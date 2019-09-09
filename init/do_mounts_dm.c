@@ -441,7 +441,6 @@ static void __init dm_setup_drives(void)
 	}
 	dm_setup_cleanup(devices);
 	dm_unlock_md_type(md);
-	dm_setup_cleanup();
 	return;
 
 export_fail:
