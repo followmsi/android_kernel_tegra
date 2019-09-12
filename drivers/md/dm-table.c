@@ -19,7 +19,6 @@
 #include <linux/mutex.h>
 #include <linux/delay.h>
 #include <linux/atomic.h>
-#include <linux/mount.h>
 
 #define DM_MSG_PREFIX "table"
 
@@ -374,18 +373,23 @@ int dm_get_device(struct dm_target *ti, const char *path, fmode_t mode,
 	int r;
 	dev_t uninitialized_var(dev);
 	struct dm_dev_internal *dd;
+	unsigned int major, minor;
 	struct dm_table *t = ti->table;
-	struct block_device *bdev;
+	char dummy;
 
 	BUG_ON(!t);
 
-	/* convert the path to a device */
-	bdev = lookup_bdev(path);
-	if (IS_ERR(bdev)) {
-		dev = name_to_dev_t(path);
-		if (!dev)
-			return -ENODEV;
+	if (sscanf(path, "%u:%u%c", &major, &minor, &dummy) == 2) {
+		/* Extract the major/minor numbers */
+		dev = MKDEV(major, minor);
+		if (MAJOR(dev) != major || MINOR(dev) != minor)
+			return -EOVERFLOW;
 	} else {
+		/* convert the path to a device */
+		struct block_device *bdev = lookup_bdev(path);
+
+		if (IS_ERR(bdev))
+			return PTR_ERR(bdev);
 		dev = bdev->bd_dev;
 		bdput(bdev);
 	}
@@ -503,14 +507,14 @@ static int adjoin(struct dm_table *table, struct dm_target *ti)
  * On the other hand, dm-switch needs to process bulk data using messages and
  * excessive use of GFP_NOIO could cause trouble.
  */
-static char **realloc_argv(unsigned *array_size, char **old_argv)
+static char **realloc_argv(unsigned *size, char **old_argv)
 {
 	char **argv;
 	unsigned new_size;
 	gfp_t gfp;
 
-	if (*array_size) {
-		new_size = *array_size * 2;
+	if (*size) {
+		new_size = *size * 2;
 		gfp = GFP_KERNEL;
 	} else {
 		new_size = 8;
@@ -518,8 +522,8 @@ static char **realloc_argv(unsigned *array_size, char **old_argv)
 	}
 	argv = kmalloc(new_size * sizeof(*argv), gfp);
 	if (argv) {
-		memcpy(argv, old_argv, *array_size * sizeof(*argv));
-		*array_size = new_size;
+		memcpy(argv, old_argv, *size * sizeof(*argv));
+		*size = new_size;
 	}
 
 	kfree(old_argv);
@@ -1121,7 +1125,7 @@ void dm_table_event(struct dm_table *t)
 }
 EXPORT_SYMBOL(dm_table_event);
 
-sector_t dm_table_get_size(struct dm_table *t)
+inline sector_t dm_table_get_size(struct dm_table *t)
 {
 	return t->num_targets ? (t->highs[t->num_targets - 1] + 1) : 0;
 }
@@ -1145,6 +1149,9 @@ struct dm_target *dm_table_find_target(struct dm_table *t, sector_t sector)
 {
 	unsigned int l, n = 0, k = 0;
 	sector_t *node;
+
+	if (unlikely(sector >= dm_table_get_size(t)))
+		return &t->targets[t->num_targets];
 
 	for (l = 0; l < t->depth; l++) {
 		n = get_child(n, k);
@@ -1432,30 +1439,6 @@ static bool dm_table_supports_discards(struct dm_table *t)
 	return 0;
 }
 
-static int device_nonrot(struct dm_target *ti, struct dm_dev *dev,
-			       sector_t start, sector_t len, void *data)
-{
-	struct request_queue *q = bdev_get_queue(dev->bdev);
-
-	return q && blk_queue_nonrot(q);
-}
-
-static bool dm_table_all_nonrot(struct dm_table *t)
-{
-	unsigned i = 0;
-
-	/* Ensure that all underlying device are non rotational. */
-	while (i < dm_table_get_num_targets(t)) {
-		struct dm_target *ti = dm_table_get_target(t, i++);
-
-		if (!ti->type->iterate_devices ||
-		    !ti->type->iterate_devices(ti, device_nonrot, NULL))
-			return false;
-	}
-
-	return true;
-}
-
 void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,
 			       struct queue_limits *limits)
 {
@@ -1470,10 +1453,6 @@ void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,
 		queue_flag_clear_unlocked(QUEUE_FLAG_DISCARD, q);
 	else
 		queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, q);
-	if (!dm_table_all_nonrot(t))
-		queue_flag_clear_unlocked(QUEUE_FLAG_NONROT, q);
-	else
-		queue_flag_set_unlocked(QUEUE_FLAG_NONROT, q);
 
 	if (dm_table_supports_flush(t, REQ_FLUSH)) {
 		flush |= REQ_FLUSH;
@@ -1522,6 +1501,9 @@ void dm_table_set_restrictions(struct dm_table *t, struct request_queue *q,
 	smp_mb();
 	if (dm_table_request_based(t))
 		queue_flag_set_unlocked(QUEUE_FLAG_STACKABLE, q);
+
+	/* io_pages is used for readahead */
+	q->backing_dev_info.io_pages = limits->max_sectors >> (PAGE_SHIFT - 9);
 }
 
 unsigned int dm_table_get_num_targets(struct dm_table *t)
