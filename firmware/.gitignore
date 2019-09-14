@@ -4,3 +4,5 @@
 *.csp
 *.dsp
 ihex2fw
+!nouveau/*.bin
+!nvidia/tegra210/*.bin
