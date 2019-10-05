@@ -32,7 +32,12 @@ static struct ion_platform_heap tegra210_heaps[] = {
 		.name	= "system",
 	},
 	{
-		.id	= ION_HEAP_TYPE_CARVEOUT,
+		/*
+		 * VPR is write-only, thus it can not be mapped to userspace.
+		 * Use negative ID to make sure wildcard allocations do not
+		 * pick it up with highest priority.
+		 */
+		.id	= -1,
 		.type	= ION_HEAP_TYPE_CARVEOUT,
 		.name	= "vpr",
 		.flags	= ION_HEAP_FLAG_DEVICE_MEM,
