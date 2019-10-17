@@ -201,7 +201,7 @@ struct ion_heap *ion_cma_heap_create(struct ion_platform_heap *data)
 	/* get device from private heaps data, later it will be
 	 * used to make the link with reserved CMA memory */
 	cma_heap->dev = data->priv;
-	cma_heap->heap.type = ION_HEAP_TYPE_DMA;
+	cma_heap->heap.type = (enum ion_heap_type)ION_HEAP_TYPE_DMA;
 	return &cma_heap->heap;
 }
 
