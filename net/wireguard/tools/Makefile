@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 #
-# Copyright (C) 2015-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
+# Copyright (C) 2015-2020 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
 
 PKG_CONFIG ?= pkg-config
 PREFIX ?= /usr
@@ -38,12 +38,17 @@ endif
 PLATFORM ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
 
 CFLAGS ?= -O3
+CFLAGS += -idirafter uapi
 CFLAGS += -std=gnu99 -D_GNU_SOURCE
 CFLAGS += -Wall -Wextra
 CFLAGS += -MMD -MP
 CFLAGS += -DRUNSTATEDIR="\"$(RUNSTATEDIR)\""
-ifeq ($(DEBUG_TOOLS),y)
+ifeq ($(DEBUG),yes)
 CFLAGS += -g
+endif
+WIREGUARD_TOOLS_VERSION = $(patsubst v%,%,$(shell GIT_CEILING_DIRECTORIES="$(PWD)/../.." git describe --dirty 2>/dev/null))
+ifneq ($(WIREGUARD_TOOLS_VERSION),)
+CFLAGS += -D'WIREGUARD_TOOLS_VERSION="$(WIREGUARD_TOOLS_VERSION)"'
 endif
 ifeq ($(PLATFORM),linux)
 LIBMNL_CFLAGS := $(shell $(PKG_CONFIG) --cflags libmnl 2>/dev/null)
@@ -63,18 +68,18 @@ endif
 
 ifneq ($(V),1)
 BUILT_IN_LINK.o := $(LINK.o)
-LINK.o = @echo "  LD      $$(pwd)/$@";
+LINK.o = @echo "  LD      $@";
 LINK.o += $(BUILT_IN_LINK.o)
 BUILT_IN_COMPILE.c := $(COMPILE.c)
-COMPILE.c = @echo "  CC      $$(pwd)/$@";
+COMPILE.c = @echo "  CC      $@";
 COMPILE.c += $(BUILT_IN_COMPILE.c)
 endif
 
-wg: $(patsubst %.c,%.o,$(wildcard *.c))
+wg: $(sort $(patsubst %.c,%.o,$(wildcard *.c)))
 
 ifneq ($(V),1)
 clean:
-	@echo "  CLEAN   $$(pwd)/{wg,*.o,*.d}"
+	@echo "  CLEAN   {wg,*.o,*.d}"
 	@$(RM) wg *.o *.d
 else
 clean:
@@ -95,9 +100,11 @@ install: wg
 	@[ "$(WITH_WGQUICK)" = "yes" -a "$(WITH_SYSTEMDUNITS)" = "yes" ] || exit 0; \
 	install -v -d "$(DESTDIR)$(SYSTEMDUNITDIR)" && install -v -m 0644 systemd/wg-quick@.service "$(DESTDIR)$(SYSTEMDUNITDIR)/wg-quick@.service"
 
-help:
-	@cat INSTALL
+check: clean
+	scan-build --html-title=wireguard-tools -maxloop 100 --view --keep-going $(MAKE) wg
 
-.PHONY: clean install help
+all: wg
+.DEFAULT_GOAL: all
+.PHONY: clean install check
 
 -include *.d

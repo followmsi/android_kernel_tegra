@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2018-2019 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
+ * Copyright (C) 2018-2020 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
 #include "curve25519.h"
@@ -76,9 +76,9 @@ static noinline void memzero_explicit(void *s, size_t count)
 }
 
 #ifdef __SIZEOF_INT128__
-#include "../crypto/zinc/curve25519/curve25519-hacl64.c"
+#include "curve25519-hacl64.h"
 #else
-#include "../crypto/zinc/curve25519/curve25519-fiat32.c"
+#include "curve25519-fiat32.h"
 #endif
 
 void curve25519_generate_public(uint8_t pub[static CURVE25519_KEY_SIZE], const uint8_t secret[static CURVE25519_KEY_SIZE])
