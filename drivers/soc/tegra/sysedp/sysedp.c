@@ -28,7 +28,7 @@
 
 #include "sysedp_internal.h"
 
-#define DEFAULT_AVAIL_BUDGET	100000	/* in mW */
+#define DEFAULT_AVAIL_BUDGET	1000000	/* in mW */
 
 /* Locked when updating limit or avail_budget */
 DEFINE_MUTEX(sysedp_lock);
