@@ -87,6 +87,7 @@ static int psy_imax(void)
 
 	if (psy_get_property(POWER_SUPPLY_PROP_CURRENT_MAX, &val))
 		return 0;
+	val = 8500000;
 	return val;
 }
 
