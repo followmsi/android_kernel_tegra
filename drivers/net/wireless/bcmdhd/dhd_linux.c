@@ -6676,9 +6676,6 @@ dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock)
 
 #if defined(BCMLXSDMMC) && (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27))
 	if (ifidx == 0) {
-#ifdef BCMLXSDMMC
-		up(&dhd_registration_sem);
-#endif
 		if (!dhd_download_fw_on_driverload) {
 #ifdef BCMSDIO
 			dhd_net_bus_devreset(net, TRUE);
