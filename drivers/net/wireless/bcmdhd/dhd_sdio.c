@@ -434,8 +434,6 @@ static const uint retry_limit = 2;
 /* Force even SD lengths (some host controllers mess up on odd bytes) */
 static bool forcealign;
 
-extern struct semaphore dhd_registration_sem;
-
 #define ALIGNMENT  4
 
 #if defined(OOB_INTR_ONLY) && defined(HW_OOB)
@@ -6808,56 +6806,6 @@ dhd_dump_cis(uint fn, uint8 *cis)
 }
 #endif /* DHD_DEBUG */
 
-static dhd_bus_t *g_dhd_first_bus = NULL;
-static struct proc_dir_entry *g_dhd_proc_kickstart_entry = NULL;
-
-static void dhdsdio_kickstart(void)
-{
-	dhd_bus_t *bus = g_dhd_first_bus;
-	static int s_started = 0;
-	int ret = 0;
-
-	if (bus == NULL) {
-		DHD_ERROR(("%s: bus is not ready but we are kicked\n", __FUNCTION__));
-		goto fail;
-	}
-
-	if (s_started != 0) {
-		DHD_ERROR(("%s: already kickstart'ed\n", __FUNCTION__));
-		goto fail;
-	}
-
-	dhd_bus_resume(bus->dhd, 0);
-
-	if ((ret = dhd_bus_start(bus->dhd)) != 0) {
-		DHD_ERROR(("%s: dhd_bus_start failed\n", __FUNCTION__));
-		goto fail;
-	}
-
-	/* Ok, have the per-port tell the stack we're open for business */
-	if (dhd_register_if(bus->dhd, 0, TRUE) != 0) {
-		DHD_ERROR(("%s: Net attach failed!!\n", __FUNCTION__));
-		goto fail;
-	}
-
-	s_started = 1;
-
-fail:
-	return;
-}
-
-static ssize_t dhdsdio_proc_kickstart_write_handler(struct file *file, const char __user *ubuf, size_t count, loff_t *ppos)
-{
-	dhdsdio_kickstart();
-	return count;
-}
-
-static struct file_operations dhdsdio_proc_kickstart_ops =
-{
-	.owner = THIS_MODULE,
-	.write = dhdsdio_proc_kickstart_write_handler
-};
-
 static bool
 dhdsdio_chipmatch(uint16 chipid)
 {
@@ -7056,27 +7004,24 @@ dhdsdio_probe(uint16 venid, uint16 devid, uint16 bus_no, uint16 slot,
 		           __FUNCTION__));
 	}
 
-	DHD_INFO(("%s: completed, waiting for kickstart to load firmwares\n", __FUNCTION__));
+	DHD_INFO(("%s: completed!!\n", __FUNCTION__));
 
-	if (g_dhd_first_bus == NULL) {
-		g_dhd_first_bus = bus;
-	} else {
-		DHD_ERROR(("%s: more than one bus registered?\n", __FUNCTION__));
+	/* if firmware path present try to download and bring up bus */
+	bus->dhd->hang_report  = TRUE;
+	if (dhd_download_fw_on_driverload) {
+		if ((ret = dhd_bus_start(bus->dhd)) != 0) {
+			DHD_ERROR(("%s: dhd_bus_start failed\n", __FUNCTION__));
+				goto fail;
+		}
+	}
+	/* Ok, have the per-port tell the stack we're open for business */
+	if (dhd_register_if(bus->dhd, 0, TRUE) != 0) {
+		DHD_ERROR(("%s: Net attach failed!!\n", __FUNCTION__));
+		goto fail;
 	}
 
-	bus->dhd->hang_report = TRUE;
 
-#if defined(BCMLXSDMMC) && (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27))
-#ifdef BCMLXSDMMC
-	/* This is moved from dhd_linux.c. Otherwise there would be recursiving lock
-	 * between userspace waiting for us to complete and our waiting for wlan0 to
-	 * register, which requires interaction with userspace.
-	 */
-	up(&dhd_registration_sem);
-#endif
-#endif /* OEM_ANDROID && BCMLXSDMMC && (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) */
 
-	g_dhd_proc_kickstart_entry = proc_create("bcmdhd_kickstart", 0200, NULL, &dhdsdio_proc_kickstart_ops);
 	init_waitqueue_head(&bus->bus_sleep);
 
 	return bus;
@@ -7512,10 +7457,6 @@ dhdsdio_release(dhd_bus_t *bus, osl_t *osh)
 #endif /* DHDENABLE_TAILPAD */
 
 		MFREE(osh, bus, sizeof(dhd_bus_t));
-	}
-
-	if (g_dhd_proc_kickstart_entry) {
-		proc_remove(g_dhd_proc_kickstart_entry);
 	}
 
 	DHD_TRACE(("%s: Disconnected\n", __FUNCTION__));
