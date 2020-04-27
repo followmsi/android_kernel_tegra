@@ -15,6 +15,31 @@
 / {
 	compatible = "google,smaug", "nvidia,tegra210";
 
+	firmware: firmware {
+		android {
+			compatible = "android,firmware";
+			fstab {
+				compatible = "android,fstab";
+				system {
+					compatible = "android,system";
+					dev = "/dev/block/platform/700b0600.sdhci/by-name/APP";
+					type = "ext4";
+					mnt_flags = "ro,barrier=1,discard";
+					fsmgr_flags = "wait";
+					status = "ok";
+				};
+				vendor {
+					compatible = "android,vendor";
+					dev = "/dev/block/platform/700b0600.sdhci/by-name/VNR";
+					type = "ext4";
+					mnt_flags = "ro,barrier=1,discard";
+					fsmgr_flags = "wait";
+					status = "ok";
+				};
+			};
+		};
+	};
+
         chosen {
 #ifdef CONFIG_KASAN
 		bootargs = "cros_legacy console=ttyS0,115200n8 init=/init rw kgdboc=ttyS0 earlycon=uart8250,mmio32,0x70006000 ignore_loglevel=1 drm.atomic=1 firmware_class.path=/vendor/firmware kern_guid=%U no_console_suspend";
