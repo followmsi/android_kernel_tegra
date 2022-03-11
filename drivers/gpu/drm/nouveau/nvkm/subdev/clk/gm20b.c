@@ -311,7 +311,7 @@ static struct gpu_edp s_gpu = {
 	.sysedp_gpupwr = 2000,
 #else
 	/* no gpu power limitation from sysedp */
-	.sysedp_gpupwr = PM_QOS_GPU_FREQ_MAX_DEFAULT_VALUE,
+	.sysedp_gpupwr = PM_QOS_GPU_POWER_MAX_DEFAULT_VALUE,
 #endif
 };
 #endif
@@ -2170,7 +2170,7 @@ gm20b_clk_edp_init(struct gm20b_clk_priv *priv)
 		goto free_fv;
 	}
 
-	pm_qos_add_notifier(PM_QOS_GPU_FREQ_MAX, &gpu_freq_max_notifier);
+	pm_qos_add_notifier(PM_QOS_MAX_GPU_POWER, &max_gpu_pwr_notifier_block);
 
 	priv->clk_therm.edp_cur_tstate = 0;
 	tcd = thermal_of_cooling_device_register(cdev_np,
@@ -2188,8 +2188,8 @@ gm20b_clk_edp_init(struct gm20b_clk_priv *priv)
 	goto free_edp_np;
 
 free_ppm:
-	pm_qos_remove_notifier(PM_QOS_GPU_FREQ_MAX,
-				&gpu_freq_max_notifier);
+	pm_qos_remove_notifier(PM_QOS_MAX_GPU_POWER,
+				&max_gpu_pwr_notifier_block);
 	tegra_ppm_destroy(ctx->ppm, NULL, NULL);
 free_fv:
 	tegra_gpu_edp_debugfs_deinit(ctx);
@@ -2212,8 +2212,8 @@ gm20b_clk_edp_deinit(struct gm20b_clk_priv *priv)
 	else
 		return;
 
-	pm_qos_remove_notifier(PM_QOS_GPU_FREQ_MAX,
-				&gpu_freq_max_notifier);
+	pm_qos_remove_notifier(PM_QOS_MAX_GPU_POWER,
+				&max_gpu_pwr_notifier_block);
 
 	tegra_ppm_destroy(ctx->ppm, NULL, NULL);
 
@@ -2230,3 +2230,4 @@ gm20b_clk_edp_init(struct gm20b_clk_priv *priv)
 static inline void gm20b_clk_edp_deinit(struct gm20b_clk_priv *priv) {}
 static inline void gpu_edp_update_cap(void) {}
 #endif /* CONFIG_NOUVEAU_GPU_EDP */
+
