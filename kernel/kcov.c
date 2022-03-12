@@ -1,5 +1,6 @@
 #define pr_fmt(fmt) "kcov: " fmt
 
+#include "kcov_defs.h"
 #include <linux/compiler.h>
 #include <linux/types.h>
 #include <linux/file.h>
@@ -12,6 +13,7 @@
 #include <linux/debugfs.h>
 #include <linux/uaccess.h>
 #include <linux/kcov.h>
+#include <linux/hardirq.h>
 
 /*
  * kcov descriptor (one per opened debugfs file).
