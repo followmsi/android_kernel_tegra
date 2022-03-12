@@ -596,16 +596,16 @@ struct drm_device *drm_dev_alloc(struct drm_driver *driver,
 
 	if (drm_core_check_feature(dev, DRIVER_KMS_LEGACY_CONTEXT) ||
 		!drm_core_check_feature(dev, DRIVER_MODESET))
-		ret = drm_legacy_ctxbitmap_init(dev);
-		if (ret) {
+		ret = drm_legacy_ctxbitmap_init(dev)
+		;if (ret) {
 			DRM_ERROR(
 				"Cannot allocate memory for context bitmap.\n");
 			goto err_ht;
 		}
 
 	if (drm_core_check_feature(dev, DRIVER_GEM)) {
-		ret = drm_gem_init(dev);
-		if (ret) {
+		ret = drm_gem_init(dev)
+		;if (ret) {
 			DRM_ERROR("Cannot initialize graphics execution manager (GEM)\n");
 			goto err_ctxbitmap;
 		}

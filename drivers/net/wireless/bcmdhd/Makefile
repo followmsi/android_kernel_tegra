@@ -1,4 +1,7 @@
 # bcmdhd
+
+ccflags-y := -Wno-misleading-indentation -Wno-tautological-compare
+
 #####################
 # SDIO Basic feature
 #####################
