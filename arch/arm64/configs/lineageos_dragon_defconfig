@@ -4084,7 +4084,7 @@ CONFIG_TEGRA_AHB=y
 #
 # CPUQuiet Framework
 #
-# CONFIG_CPU_QUIET is not set
+CONFIG_CPUQUIET_FRAMEWORK=y
 # CONFIG_NVMEM is not set
 
 #
